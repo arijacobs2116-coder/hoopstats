@@ -253,24 +253,6 @@ if uploaded_file is not None:
         ("Stl%", "Steal %"),
     ]
 
-    # ---------- On-page markdown preview ----------
-    st.subheader("Organized Advanced Stats (Preview)")
-    combined_blocks = []
-    for col, title in categories:
-        block = format_category_block(df_stats, col, title)
-        st.markdown(block)
-        st.markdown("---")
-        combined_blocks.append(block)
-
-    # Optional TXT download of all categories
-    all_text = "\n\n".join(combined_blocks)
-    st.download_button(
-        label="Download Organized Stats as .txt",
-        data=all_text,
-        file_name="organized_advanced_stats.txt",
-        mime="text/plain",
-    )
-
     # ---------- Build DOCX (logo + two-column layout, tight vertical spacing) ----------
     doc = Document()
 
