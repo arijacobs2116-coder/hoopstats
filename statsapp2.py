@@ -10,8 +10,8 @@ from PIL import Image
 
 # ---------------- Streamlit page config ----------------
 
-st.set_page_config(page_title="KenPom Advanced & Overview Stats Organizer", layout="wide")
-st.title("KenPom Advanced & Overview Stats Organizer")
+st.set_page_config(page_title="Advanced & Overview Stats Organizer", layout="wide")
+st.title("Advanced & Overview Stats Organizer")
 st.write(
     "Upload a **KenPom-style Advanced Stats CSV** (with jersey + player columns and ORtg, "
     "%Poss, %Shots, eFG%, TS%, OR%, DR%, ARate, TORate, Blk%, Stl%, FC/40, FD/40, FTRate).\n\n"
