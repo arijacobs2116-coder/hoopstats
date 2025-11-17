@@ -540,6 +540,7 @@ if logo_file is not None:
     if logo_bytes:
         header_color = get_darkest_color_from_logo(logo_bytes)
 
+# --- Advanced Stats Section (KenPom) ---
 st.markdown("### Advanced Stats Input")
 
 pasted_kenpom = st.text_area(
@@ -555,12 +556,18 @@ uploaded_file = st.file_uploader(
          "ARate, TORate, Blk%, Stl%, FC/40, FD/40, FTRate.",
 )
 
+st.markdown("---")  # horizontal divider between sections
+
+# --- Overview Section (CBB Stats) ---
+st.markdown("### Overview Stats Input (CBB)")
+
 overview_file = st.file_uploader(
-    "Upload a **CBB Overview** CSV (tsPct, fg2Pct, usagePct, pfP40, pfEff, etc.)",
+    "Upload a **CBB Overview** CSV (tsPct, fg2Pct, fg3Pct, usagePct, pfP40, pfEff, etc.)",
     type=["csv"],
     key="overview_csv",
     help="This will be formatted into an OVERVIEW DOCX similar to your overview template.",
 )
+
 
 # ---------- ADVANCED STATS PIPELINE ----------
 
