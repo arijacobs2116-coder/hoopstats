@@ -517,6 +517,9 @@ team_name = st.text_input(
     help="Shown as '<TEAM> ADVANCED STATISTICS' and '<TEAM> OVERVIEW STATISTICS' in the documents.",
 )
 
+if team_name.strip() == "":
+    st.error("❗ Team name is required.")
+
 logo_file = st.file_uploader(
     "Upload Team Logo (REQUIRED)",
     type=["png", "jpg", "jpeg"],
@@ -524,8 +527,6 @@ logo_file = st.file_uploader(
     help="Logo will appear at the top of both DOCX files, and its darkest non-black color will be used for titles and headers.",
 )
 
-if team_name.strip() == "":
-    st.error("❗ Team name is required.")
 
 if logo_file is None:
     st.error("❗ Team logo is required.")
