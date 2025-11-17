@@ -540,33 +540,75 @@ if logo_file is not None:
     if logo_bytes:
         header_color = get_darkest_color_from_logo(logo_bytes)
 
-# --- Advanced Stats Section (KenPom) ---
-st.markdown("### Advanced Stats Input (Kenpom)")
+# =========================================================
+#  ADVANCED STATS INPUT SECTION (KENPOM)
+# =========================================================
+
+st.markdown("### Advanced Stats Input (KenPom)")
 
 pasted_kenpom = st.text_area(
-    "Paste raw KenPom advanced/usage table here (copy straight from KenPom page):",
+    "Paste raw KenPom advanced/usage table here:",
     height=300,
-    help="On KenPom, highlight the whole advanced/usage table (including headers), copy, and paste here.",
+    help="Highlight the whole advanced/usage table on KenPom → Copy → Paste here.",
 )
 
 uploaded_file = st.file_uploader(
-    "Or upload a KenPom-style **Advanced Stats** CSV",
+    "Or upload an Advanced Stats CSV",
     type=["csv"],
-    help="CSV should have jersey + player columns and ORtg, %Poss, %Shots, eFG%, TS%, OR%, DR%, "
-         "ARate, TORate, Blk%, Stl%, FC/40, FD/40, FTRate.",
+    help="CSV must include: ORtg, %Poss, %Shots, eFG%, TS%, OR%, DR%, ARate, TORate, Blk%, Stl%, FC/40, FD/40, FTRate",
 )
 
-st.markdown("---")  # horizontal divider between sections
+# ---------------- BLUE NOTE FOR ADVANCED STATS ----------------
+st.markdown(
+    """
+<div style="
+    background-color:#0A66C2;
+    padding:12px;
+    border-radius:6px;
+    color:white;
+    font-size:15px;
+    margin-top:10px;
+">
+⬆️ Paste KenPom text above or upload an <strong>Advanced Stats CSV</strong> to generate the Advanced Stats DOCX
+(after entering team name and logo).
+</div>
+""",
+    unsafe_allow_html=True
+)
 
-# --- Overview Section (CBB Stats) ---
+st.markdown("---")  # Divider between sections
+
+
+# =========================================================
+#  OVERVIEW STATS INPUT SECTION (CBB)
+# =========================================================
+
 st.markdown("### Overview Stats Input (CBB)")
 
 overview_file = st.file_uploader(
-    "Upload a **CBB Overview** CSV (tsPct, fg2Pct, fg3Pct, usagePct, pfP40, pfEff, etc.)",
+    "Upload a CBB Overview CSV (tsPct, fg2Pct, fg3Pct, usagePct, pfP40, pfEff, etc.)",
     type=["csv"],
-    key="overview_csv",
-    help="This will be formatted into an OVERVIEW DOCX similar to your overview template.",
+    help="This will be used to generate the Overview DOCX.",
 )
+
+# ---------------- BLUE NOTE FOR OVERVIEW STATS ----------------
+st.markdown(
+    """
+<div style="
+    background-color:#0A66C2;
+    padding:12px;
+    border-radius:6px;
+    color:white;
+    font-size:15px;
+    margin-top:10px;
+">
+⬆️ Upload a <strong>CBB Overview CSV</strong> to generate the Overview DOCX
+(after entering team name and logo).
+</div>
+""",
+    unsafe_allow_html=True
+)
+
 
 
 # ---------- ADVANCED STATS PIPELINE ----------
