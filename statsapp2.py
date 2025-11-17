@@ -541,7 +541,7 @@ if logo_file is not None:
         header_color = get_darkest_color_from_logo(logo_bytes)
 
 # --- Advanced Stats Section (KenPom) ---
-st.markdown("### Advanced Stats Input")
+st.markdown("### Advanced Stats Input (Kenpom)")
 
 pasted_kenpom = st.text_area(
     "Paste raw KenPom advanced/usage table here (copy straight from KenPom page):",
