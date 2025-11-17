@@ -11,10 +11,10 @@ import re
 
 # ---------------- Streamlit page config ----------------
 
-st.set_page_config(page_title="KenPom Advanced Stats & CBBAnalytics Overview Stats Organizer", layout="wide")
+st.set_page_config(page_title="College Basketball Stats Organizer", layout="wide")
 st.title("KenPom Advanced Stats & CBBAnalytics Overview Stats Organizer")
 st.write(
-    "Copy the **advanced usage/stats table directly from KenPom**, paste the raw text below, "
+    "Copy the **advanced stats table directly from KenPom**, paste the raw text below, "
     "and the app will parse it into clean advanced stats.\n\n"
     "Optional: upload a **CBB Overview CSV** (tsPct, fg2Pct, fg3Pct, usagePct, pfP40, pfEff, etc.) "
     "to generate a matching OVERVIEW DOCX.\n\n"
