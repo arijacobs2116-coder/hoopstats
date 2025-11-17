@@ -141,7 +141,7 @@ uploaded_file = st.file_uploader(
 
 team_name = st.text_input(
     "Team name for DOCX title",
-    value="MCNEESE STATE",
+    value="",
     help="This will appear at the top of the Word document as '<TEAM> ADVANCED STATISTICS'.",
 )
 
