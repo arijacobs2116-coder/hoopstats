@@ -9,7 +9,7 @@ from io import BytesIO
 
 # ---------------- Streamlit page config ----------------
 
-st.set_page_config(page_title="KenPom CSV Advanced Stats Organizer", layout="wide")
+st.set_page_config(page_title="KenPom Advanced Stats Organizer", layout="wide")
 st.title("KenPom CSV Advanced Stats Organizer")
 st.write(
     "Upload a **CSV** exported from your spreadsheet with jersey, name, and an advanced "
