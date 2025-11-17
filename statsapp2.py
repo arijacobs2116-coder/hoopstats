@@ -7,18 +7,19 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from io import BytesIO
 from PIL import Image
+import re
 
 # ---------------- Streamlit page config ----------------
 
 st.set_page_config(page_title="KenPom Advanced & Overview Stats Organizer", layout="wide")
 st.title("KenPom Advanced & Overview Stats Organizer")
 st.write(
-    "Upload a **KenPom-style Advanced Stats CSV** (with jersey + player columns and ORtg, "
-    "%Poss, %Shots, eFG%, TS%, OR%, DR%, ARate, TORate, Blk%, Stl%, FC/40, FD/40, FTRate).\n\n"
-    "Optionally, upload a **CBB Overview CSV** (tsPct, fg2Pct, fg3Pct, usagePct, pfP40, pfEff, etc.) "
+    "Copy the **advanced usage/stats table directly from KenPom**, paste the raw text below, "
+    "and the app will parse it into clean advanced stats.\n\n"
+    "Optional: upload a **CBB Overview CSV** (tsPct, fg2Pct, fg3Pct, usagePct, pfP40, pfEff, etc.) "
     "to generate a matching OVERVIEW DOCX.\n\n"
-    "The app will sort each category, add ranks, color titles and headers with your logo color, "
-    "and export Word docs in a two-column format.\n\n"
+    "The app sorts each category, adds ranks, colors titles and headers with your logo color, "
+    "and exports Word docs in a two-column format.\n\n"
     "**Team name and team logo are required before generating any DOCX.**"
 )
 
@@ -28,8 +29,6 @@ def clean_player_name(name: str) -> str:
     """
     Cleans KenPom names by removing junk like 'National Rank' etc.
     """
-    import re
-
     if not isinstance(name, str):
         name = str(name)
 
@@ -54,34 +53,24 @@ def clean_jersey(j):
         return str(j).strip()
 
 
-def load_and_clean_kenpom_csv(uploaded_file):
+def _final_clean_kenpom_df(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Loads a KenPom-style advanced stats CSV:
-      - First two columns are Unnamed: 0 (jersey), Unnamed: 1 (name)
+    Shared final cleaning logic for KenPom advanced stats DataFrame.
+    Assumes df already has 'Jersey' and 'Player' columns populated.
     """
-    df = pd.read_csv(uploaded_file)
-
-    # Clean whitespace from headers
-    df.columns = [c.strip() for c in df.columns]
-
-    # Jersey + player
-    df["Jersey"] = df["Unnamed: 0"].astype(str).str.strip()
-    df["Player"] = df["Unnamed: 1"].astype(str).str.strip()
-    df["Player"] = df["Player"].apply(clean_player_name)
-
-    # Drop raw cols
-    df = df.drop(columns=["Unnamed: 0", "Unnamed: 1"])
-
     # Remove category header rows (blank jerseys)
     df = df[df["Jersey"].notna() & (df["Jersey"].str.len() > 0)].copy()
 
-    # Clean jersey
+    # Clean jersey formatting
     df["Jersey"] = (
         df["Jersey"]
         .astype(str)
         .str.replace(".0", "", regex=False)
         .str.strip()
     )
+
+    # Clean player names (remove National Rank junk)
+    df["Player"] = df["Player"].apply(clean_player_name)
 
     allowed_columns = [
         "Jersey",
@@ -124,14 +113,249 @@ def load_and_clean_kenpom_csv(uploaded_file):
     return df
 
 
+def load_and_clean_kenpom_csv(uploaded_file):
+    """
+    Fallback: Loads a KenPom-style advanced stats CSV:
+      - First two columns are Unnamed: 0 (jersey), Unnamed: 1 (name), etc.
+    """
+    df = pd.read_csv(uploaded_file)
+
+    # Clean whitespace from headers
+    df.columns = [c.strip() for c in df.columns]
+
+    # Jersey + player
+    if "Unnamed: 0" in df.columns and "Unnamed: 1" in df.columns:
+        df["Jersey"] = df["Unnamed: 0"].astype(str).str.strip()
+        df["Player"] = df["Unnamed: 1"].astype(str).str.strip()
+        df = df.drop(columns=["Unnamed: 0", "Unnamed: 1"])
+    else:
+        # Fallback if headers were renamed
+        jersey_col = None
+        player_col = None
+        for c in df.columns:
+            lc = c.lower()
+            if "jersey" in lc or lc in ("#", "no", "number"):
+                jersey_col = c
+            if "player" in lc or "name" in lc:
+                player_col = c
+
+        if jersey_col is None or player_col is None:
+            raise ValueError("Could not find jersey/name columns in advanced stats CSV.")
+
+        df["Jersey"] = df[jersey_col].astype(str).str.strip()
+        df["Player"] = df[player_col].astype(str).str.strip()
+
+    df = _final_clean_kenpom_df(df)
+    return df
+
+
+def extract_numbers(line: str):
+    """Return list of floatable numbers found in a line."""
+    nums = re.findall(r"[-+]?\d*\.?\d+", line)
+    out = []
+    for n in nums:
+        try:
+            out.append(float(n))
+        except ValueError:
+            continue
+    return out
+
+
+def parse_kenpom_paste(raw: str) -> pd.DataFrame:
+    """
+    Parse raw text copied directly from a KenPom player-usage/advanced page.
+
+    Strategy:
+      * Treat each PLAYER as a "block" of lines between jersey/name lines.
+      * Inside each block:
+          - Identify jersey + name.
+          - Find height token (like '6-9'), then weight, year (Fr/So/Jr/Sr/Gr).
+          - Starting after the year, locate the (%Min, ORtg) pair by value pattern:
+                %Min ≈ 0–100 with decimal, ORtg ≈ 50–200.
+          - Everything after ORtg up to the first shooting-split token (like '27-34')
+            is "advanced zone".
+          - In the advanced zone we use the KenPom rule:
+              **all real stats have a decimal point, ranks do not**.
+            So we take the first 13 tokens that contain a "." as:
+                %Poss, %Shots, eFG%, TS%, OR%, DR%, ARate,
+                TORate, Blk%, Stl%, FC/40, FD/40, FTRate.
+    """
+
+    # Clean + strip empty lines
+    lines = [ln.rstrip() for ln in raw.splitlines()]
+    lines = [ln for ln in lines if ln.strip()]
+
+    # Find indices of lines that start a player: "12 Cameron Boozer", "8 Darren Harris ..."
+    player_starts = []
+    for idx, line in enumerate(lines):
+        if re.match(r"^\s*\d+\s+[A-Za-z]", line):
+            player_starts.append(idx)
+
+    if not player_starts:
+        raise ValueError("No player lines found in pasted text (no lines starting with jersey + name).")
+
+    players = []
+
+    def parse_player_block(block_lines):
+        text = " ".join(block_lines)
+        tokens = text.split()
+        if not tokens:
+            return None
+
+        # 1) Jersey
+        if not tokens[0].isdigit():
+            return None
+        jersey = tokens[0]
+
+        # 2) Name: from tokens[1] until we hit HEIGHT (e.g., '6-9') or YEAR (Fr/So/etc)
+        name_tokens = []
+        height_idx = None
+        year_tokens = {"Fr", "So", "Jr", "Sr", "Gr", "Fr.", "So.", "Jr.", "Sr."}
+
+        for i in range(1, len(tokens)):
+            t = tokens[i]
+            if re.match(r"^\d+-\d+$", t) or t in year_tokens:
+                height_idx = i if re.match(r"^\d+-\d+$", t) else None
+                break
+            else:
+                name_tokens.append(t)
+
+        if not name_tokens:
+            return None
+
+        name = " ".join(name_tokens)
+
+        # --- extra cleaning just for pasted KenPom names ---
+        # Remove 'National Rank' if it somehow got stuck in the name line
+        name = re.sub(r"(?i)\s*national\s*rank.*$", "", name)
+
+        # Remove trailing digits like '1' in 'Cameron Boozer 1'
+        name = re.sub(r"\s*\d+$", "", name)
+
+        # Collapse extra spaces
+        name = " ".join(name.split())
+
+
+        # If we didn't find an explicit height token yet, scan again for it
+        if height_idx is None:
+            for i in range(len(name_tokens) + 1, len(tokens)):
+                t = tokens[i]
+                if re.match(r"^\d+-\d+$", t):
+                    height_idx = i
+                    break
+
+        if height_idx is None or height_idx + 2 >= len(tokens):
+            return {"Jersey": jersey, "Player": name}
+
+        # 3) Height, weight, year
+        yr_idx = height_idx + 2  # tokens[height_idx] = Ht, [height_idx+1]=Wt, [height_idx+2]=Yr
+
+        # 4) Find %Min and ORtg by scanning numeric tokens after YEAR
+        numeric_positions = []  # list of (token_index, float_value)
+        for j in range(yr_idx + 1, len(tokens)):
+            t = tokens[j]
+            try:
+                v = float(t.replace("%", ""))
+                numeric_positions.append((j, v))
+            except ValueError:
+                continue
+
+        percent_min = None
+        ortg = None
+        ortg_token_index = None
+
+        # Look for first pair (v_k, v_{k+1}) s.t.
+        #   v_k ~ %Min: 0 <= v_k <= 100 and token has a decimal point
+        #   v_{k+1} ~ ORtg: 50 <= v_{k+1} <= 200
+        for idx in range(len(numeric_positions) - 1):
+            pos_k, v_k = numeric_positions[idx]
+            pos_k1, v_k1 = numeric_positions[idx + 1]
+            token_k = tokens[pos_k]
+            if "." in token_k and 0 <= v_k <= 100 and 50 <= v_k1 <= 200:
+                percent_min = v_k
+                ortg = v_k1
+                ortg_token_index = pos_k1
+                break
+
+        if ortg is None or ortg_token_index is None:
+            return None
+
+        # 5) Advanced zone: from token after ORtg until first shooting-split token
+        #    (like '27-34', '21-32', '7-19') or until 'FTM-A'/'2PM-A'/'3PM-A'.
+        adv_start = ortg_token_index + 1
+        adv_end = len(tokens)
+        for j in range(adv_start, len(tokens)):
+            t = tokens[j]
+            if "-" in t or t in ("FTM-A", "2PM-A", "3PM-A"):
+                adv_end = j
+                break
+
+        adv_tokens = tokens[adv_start:adv_end]
+
+        # *** KEY CHANGE: use decimal vs integer to separate stats from ranks ***
+        # KenPom stats have one decimal place; ranks are plain integers.
+        stat_tokens = [t for t in adv_tokens if "." in t]
+
+        if not stat_tokens:
+            return {"Jersey": jersey, "Player": name, "ORtg": ortg}
+
+        # First 13 decimal tokens are our advanced stats, in order:
+        # %Poss, %Shots, eFG%, TS%, OR%, DR%, ARate, TORate, Blk%, Stl%, FC/40, FD/40, FTRate
+        stat_tokens = stat_tokens[:13]
+        stat_values = []
+        for t in stat_tokens:
+            try:
+                stat_values.append(float(t.replace("%", "")))
+            except ValueError:
+                stat_values.append(None)
+
+        while len(stat_values) < 13:
+            stat_values.append(None)
+
+        stat_cols_order = [
+            "ORtg",
+            "%Poss",
+            "%Shots",
+            "eFG%",
+            "TS%",
+            "OR%",
+            "DR%",
+            "ARate",
+            "TORate",
+            "Blk%",
+            "Stl%",
+            "FC/40",
+            "FD/40",
+            "FTRate",
+        ]
+
+        row = {"Jersey": jersey, "Player": name, "ORtg": ortg}
+        for col_name, val in zip(stat_cols_order[1:], stat_values):
+            row[col_name] = val
+
+        return row
+
+    # Build blocks and parse each
+    for idx, start_idx in enumerate(player_starts):
+        end_idx = player_starts[idx + 1] if idx + 1 < len(player_starts) else len(lines)
+        block_lines = lines[start_idx:end_idx]
+        row = parse_player_block(block_lines)
+        if row is not None:
+            players.append(row)
+
+    if not players:
+        raise ValueError("Could not parse any players from the pasted KenPom text.")
+
+    df = pd.DataFrame(players)
+    df = _final_clean_kenpom_df(df)
+    return df
+
+
+
 def load_and_clean_overview_csv(uploaded_file):
     """
     Loads a CBB Analytics-style overview CSV and returns:
       Jersey, Player, and the overview stats used in the layout.
-    Expected raw columns include:
-      fullName, jerseyNum, tsPct, fgaP40, fg2Pct, fg3Pct, ftPct,
-      fga3Rate, usagePct, ftaRate, orbPct, drbPct, stlPct,
-      astPct, astTov, astUsage, tovPct, pfP40, pfEff, blkPct
     """
     df = pd.read_csv(uploaded_file)
 
@@ -238,12 +462,10 @@ def format_overview_value(col: str, value: float) -> str:
         "orbPct", "drbPct", "stlPct", "tovPct",
     ]
     if col in percent_cols:
-        # If <2, treat as decimal (0.487 → 48.7%), (1.111 → 111.1%)
         if value < 2:
             value = value * 100
         return f"{value:.1f}%"
 
-    # Fallback
     return f"{value:.1f}"
 
 
@@ -251,18 +473,12 @@ def get_darkest_color_from_logo(logo_bytes):
     """
     Given raw logo bytes, return an RGBColor corresponding to a dark
     NON-BACKGROUND color in the image.
-
-    - Ignores fully transparent pixels
-    - Ignores near-black pixels (background like #000000)
-    - Among the remaining pixels, picks the lowest-luminance color
-    - If everything is near-black, falls back to including black
     """
     try:
         img = Image.open(BytesIO(logo_bytes)).convert("RGBA")
     except Exception:
         return None
 
-    # Downsize for speed
     img = img.resize((64, 64))
 
     def find_dark_color(ignore_near_black: bool):
@@ -271,13 +487,11 @@ def get_darkest_color_from_logo(logo_bytes):
 
         for r, g, b, a in img.getdata():
             if a == 0:
-                continue  # ignore fully transparent
+                continue
 
-            # Optionally skip near-black background pixels
             if ignore_near_black and r < 15 and g < 15 and b < 15:
                 continue
 
-            # Perceptual luminance
             lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
             if lum < darkest_lum:
                 darkest_lum = lum
@@ -285,10 +499,7 @@ def get_darkest_color_from_logo(logo_bytes):
 
         return darkest_rgb
 
-    # First try: ignore near-black (background)
     darkest_rgb = find_dark_color(ignore_near_black=True)
-
-    # Fallback: if everything was near-black, allow black too
     if darkest_rgb is None:
         darkest_rgb = find_dark_color(ignore_near_black=False)
 
@@ -313,7 +524,6 @@ logo_file = st.file_uploader(
     help="Logo will appear at the top of both DOCX files, and its darkest non-black color will be used for titles and headers.",
 )
 
-# Show immediate validation messages for required fields
 if team_name.strip() == "":
     st.error("❗ Team name is required.")
 
@@ -323,86 +533,90 @@ if logo_file is None:
 title_text = (team_name or "").strip().upper()
 safe_team_name = (title_text or "TEAM").replace(" ", "_")
 
-# Read logo once, reuse bytes + compute header color
 logo_bytes = None
 header_color = None
-
 if logo_file is not None:
     logo_bytes = logo_file.read()
     if logo_bytes:
         header_color = get_darkest_color_from_logo(logo_bytes)
 
+st.markdown("### Advanced Stats Input")
+
+pasted_kenpom = st.text_area(
+    "Paste raw KenPom advanced/usage table here (copy straight from KenPom page):",
+    height=300,
+    help="On KenPom, highlight the whole advanced/usage table (including headers), copy, and paste here.",
+)
+
 uploaded_file = st.file_uploader(
-    "Upload a KenPom-style **Advanced Stats** CSV",
+    "Or upload a KenPom-style **Advanced Stats** CSV",
     type=["csv"],
-    help="Row 0 must have ORtg, %Poss, %Shots, eFG%, TS%, OR%, DR%, ARate, "
-         "TORate, Blk%, Stl%, FC/40, FD/40, FTRate (starting at column 3+).",
+    help="CSV should have jersey + player columns and ORtg, %Poss, %Shots, eFG%, TS%, OR%, DR%, "
+         "ARate, TORate, Blk%, Stl%, FC/40, FD/40, FTRate.",
 )
 
 overview_file = st.file_uploader(
-    "Upload a **CBB Overview** CSV (tsPct, fg2Pct, fg3Pct, usagePct, pfP40, pfEff, etc.)",
+    "Upload a **CBB Overview** CSV (tsPct, fg2Pct, usagePct, pfP40, pfEff, etc.)",
     type=["csv"],
     key="overview_csv",
     help="This will be formatted into an OVERVIEW DOCX similar to your overview template.",
 )
 
-# ---------- ADVANCED STATS PIPELINE (Download Button #1) ----------
+# ---------- ADVANCED STATS PIPELINE ----------
 
-if uploaded_file is not None:
-    # Enforce required team name and logo before processing
+df_stats = None
+
+if pasted_kenpom.strip():
+    try:
+        df_stats = parse_kenpom_paste(pasted_kenpom)
+    except Exception as e:
+        st.error(f"Error parsing pasted KenPom text: {e}")
+        df_stats = None
+elif uploaded_file is not None:
+    try:
+        df_stats = load_and_clean_kenpom_csv(uploaded_file)
+    except Exception as e:
+        st.error(f"Error reading advanced stats CSV: {e}")
+        df_stats = None
+
+if df_stats is not None:
     if title_text == "":
         st.error("❗ Please enter a team name before generating the Advanced Stats DOCX.")
     elif logo_bytes is None:
         st.error("❗ Please upload a team logo before generating the Advanced Stats DOCX.")
     else:
-        try:
-            df_stats = load_and_clean_kenpom_csv(uploaded_file)
-        except Exception as e:
-            st.error(f"Error reading advanced stats CSV: {e}")
-            st.stop()
-
         st.subheader("Parsed Advanced Stats Table")
         st.dataframe(df_stats, use_container_width=True)
 
         categories = [
             ("ORtg", "Offensive Rating"),
             ("FTRate", "Free-Throw Rate"),
-
             ("%Poss", "% of Possessions"),
             ("eFG%", "Effective FG%"),
-
             ("%Shots", "% of Shots"),
             ("TS%", "True Shooting %"),
-
             ("OR%", "Offensive Rebound %"),
             ("DR%", "Defensive Rebound %"),
-
             ("TORate", "Turnover Rate"),
             ("ARate", "Assist Rate"),
-
             ("FD/40", "Fouls Drawn per 40"),
             ("FC/40", "Fouls Committed per 40"),
-
             ("Blk%", "Block %"),
             ("Stl%", "Steal %"),
         ]
 
-        # Build Advanced DOCX
         doc = Document()
-
         style = doc.styles["Normal"]
         font = style.font
         font.name = "Calibri"
         font.size = Pt(11)
 
-        # Logo
         if logo_bytes:
             logo_stream = BytesIO(logo_bytes)
-            pic = doc.add_picture(logo_stream, width=Inches(1.2))
+            doc.add_picture(logo_stream, width=Inches(1.2))
             last_paragraph = doc.paragraphs[-1]
             last_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-        # Title
         title_paragraph = doc.add_paragraph()
         run = title_paragraph.add_run(f"{title_text} ADVANCED STATISTICS")
         run.bold = True
@@ -412,7 +626,6 @@ if uploaded_file is not None:
         title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         title_paragraph.paragraph_format.space_after = Pt(4)
 
-        # Pair categories into left/right
         pairs = []
         for i in range(0, len(categories), 2):
             if i + 1 < len(categories):
@@ -529,13 +742,12 @@ if uploaded_file is not None:
             key="download_advanced",
         )
 else:
-    st.info("⬆️ Upload an **Advanced Stats** CSV to generate the advanced stats DOCX (after entering team name and logo).")
+    st.info("⬆️ Paste KenPom text above or upload an **Advanced Stats** CSV to generate the Advanced Stats DOCX (after entering team name and logo).")
 
 
-# ---------- OVERVIEW PIPELINE (Download Button #2) ----------
+# ---------- OVERVIEW PIPELINE ----------
 
 if overview_file is not None:
-    # Enforce required team name and logo before processing
     if title_text == "":
         st.error("❗ Please enter a team name before generating the Overview DOCX.")
     elif logo_bytes is None:
@@ -550,7 +762,6 @@ if overview_file is not None:
         st.subheader("Parsed Overview Table")
         st.dataframe(df_overview, use_container_width=True)
 
-        # Left column categories
         left_overview = [
             ("tsPct", "True Shooting %"),
             ("fgaP40", "Field Goal Attempts per 40 (FGA/40)"),
@@ -563,7 +774,6 @@ if overview_file is not None:
             ("blkPct", "Block %"),
         ]
 
-        # Right column categories
         right_overview = [
             ("fg3Pct", "Three-Point %"),
             ("ftPct", "Free Throw %"),
@@ -584,16 +794,14 @@ if overview_file is not None:
             overview_pairs.append((left, right))
 
         overview_doc = Document()
-
         style = overview_doc.styles["Normal"]
         font = style.font
         font.name = "Calibri"
         font.size = Pt(11)
 
-        # Logo again
         if logo_bytes:
             logo_stream = BytesIO(logo_bytes)
-            pic = overview_doc.add_picture(logo_stream, width=Inches(1.2))
+            overview_doc.add_picture(logo_stream, width=Inches(1.2))
             last_paragraph = overview_doc.paragraphs[-1]
             last_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
@@ -606,7 +814,6 @@ if overview_file is not None:
         title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         title_paragraph.paragraph_format.space_after = Pt(4)
 
-        # Build two-column overview layout with ranks
         for left_cat, right_cat in overview_pairs:
             table = overview_doc.add_table(rows=1, cols=2)
             table.autofit = True
