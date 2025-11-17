@@ -34,6 +34,9 @@ def load_and_clean_kenpom_csv(uploaded_file):
     df["Jersey"] = df["Unnamed: 0"].astype(str).str.strip()
     df["Player"] = df["Unnamed: 1"].astype(str).str.strip()
 
+    # 🔥 Clean player names (remove 'National Rank' junk)
+    df["Player"] = df["Player"].apply(clean_player_name)
+
     df = df.drop(columns=["Unnamed: 0", "Unnamed: 1"])
 
     # ---- REMOVE CATEGORY HEADER ROWS (not real players) ----
