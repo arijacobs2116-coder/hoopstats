@@ -11,8 +11,8 @@ import re
 
 # ---------------- Streamlit page config ----------------
 
-st.set_page_config(page_title="KenPom Advanced & Overview Stats Organizer", layout="wide")
-st.title("KenPom Advanced & Overview Stats Organizer")
+st.set_page_config(page_title="KenPom Advanced Stats & CBBAnalytics Overview Stats Organizer", layout="wide")
+st.title("KenPom Advanced Stats & CBBAnalytics Overview Stats Organizer")
 st.write(
     "Copy the **advanced usage/stats table directly from KenPom**, paste the raw text below, "
     "and the app will parse it into clean advanced stats.\n\n"
