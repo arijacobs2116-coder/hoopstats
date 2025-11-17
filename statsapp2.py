@@ -126,11 +126,7 @@ def remove_table_borders(table):
 
 # ---------------- Streamlit UI ----------------
 
-logo_file = st.file_uploader(
-    "Optional team logo (will appear at top of DOCX)",
-    type=["png", "jpg", "jpeg"],
-    key="logo",
-)
+
 
 uploaded_file = st.file_uploader(
     "Upload a KenPom-style CSV",
@@ -143,6 +139,12 @@ team_name = st.text_input(
     "Team name for DOCX title",
     value="",
     help="This will appear at the top of the Word document as '<TEAM> ADVANCED STATISTICS'.",
+)
+
+logo_file = st.file_uploader(
+    "Optional team logo (will appear at top of DOCX)",
+    type=["png", "jpg", "jpeg"],
+    key="logo",
 )
 
 if uploaded_file is not None:
