@@ -36,6 +36,39 @@ def load_and_clean_kenpom_csv(uploaded_file):
 
     df = df.drop(columns=["Unnamed: 0", "Unnamed: 1"])
 
+    # ---- REMOVE CATEGORY HEADER ROWS (not real players) ----
+    df = df[df["Jersey"].notna() & (df["Jersey"].str.len() > 0)].copy()
+
+    # Make jersey a clean string like "12" instead of "12.0"
+    df["Jersey"] = (
+        df["Jersey"]
+        .astype(str)
+        .str.replace(".0", "", regex=False)
+        .str.strip()
+    )
+
+    # ---- KEEP ONLY THE STAT COLUMNS WE WANT ----
+    allowed_columns = [
+        "Jersey",
+        "Player",
+        "ORtg",
+        "%Poss",
+        "%Shots",
+        "eFG%",
+        "TS%",
+        "OR%",
+        "DR%",
+        "ARate",
+        "TORate",
+        "Blk%",
+        "Stl%",
+        "FC/40",
+        "FD/40",
+        "FTRate",
+    ]
+
+    df = df[[c for c in df.columns if c in allowed_columns]].copy()
+
     # Convert numeric columns
     numeric_cols = [c for c in df.columns if c not in ["Jersey", "Player"]]
 
@@ -47,9 +80,44 @@ def load_and_clean_kenpom_csv(uploaded_file):
             .str.replace(",", "", regex=False)
             .str.strip()
         )
+        
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
+        # ---- TRUNCATE to exactly 1 decimal place (NO rounding, KenPom style) ----
+        df[col] = df[col].apply(
+            lambda x: float(int(x * 10)) / 10 if pd.notna(x) else x
+        )
+
     return df
+
+
+def clean_player_name(name: str) -> str:
+    """
+    Cleans KenPom names by removing junk like 'National Rank' while leaving real names intact.
+    Handles variants like:
+    - 'Cameron Boozer 1National Rank'
+    - 'Patrick NgongbaNational Rank'
+    - 'Isaiah Evans NationalRank'
+    - etc.
+    """
+    import re
+
+    if not isinstance(name, str):
+        name = str(name)
+
+    s = name.replace("\n", " ")
+
+    # Remove 'National Rank' (case-insensitive, optional spaces)
+    s = re.sub(r"(?i)national\s*rank.*$", "", s)
+
+    # Remove digits stuck to the end (like '1' in 'Boozer1')
+    s = re.sub(r"\d+$", "", s)
+
+    # Collapse extra spaces
+    s = " ".join(s.split())
+
+    return s.strip()
+
 
 
 def clean_jersey(j):
