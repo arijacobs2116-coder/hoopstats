@@ -399,4 +399,6 @@ if uploaded_file is not None:
 
 else:
     st.info("⬆️ Upload a CSV exported from your KenPom/advanced stats sheet to begin.")
+st.markdown("<p style='text-align: center; font-size: 12px; color: gray;'>By Ari Jacobs</p>", unsafe_allow_html=True)
+
 
