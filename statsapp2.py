@@ -745,6 +745,8 @@ if team_pdf is not None:
         # ================================================================
         #  READ PDF + EXTRACT ZONE FGA%
         # ================================================================
+        # Reset pointer before first read
+        team_pdf.seek(0)       
         try:
             df_shooting = parse_cbb_team_pdf_shooting_zones(team_pdf)
         except Exception as e:
@@ -795,8 +797,9 @@ if team_pdf is not None:
             #         EXTRACT 2s / 3s (makes & attempts) FROM PDF
             # ================================================================
             import re
-            pdf_bytes = team_pdf.read()
+            # Reset pointer before second read
             team_pdf.seek(0)
+            pdf_bytes = team_pdf.read()
             reader = PdfReader(BytesIO(pdf_bytes))
 
             def parse_two_three_point_lines(text):
