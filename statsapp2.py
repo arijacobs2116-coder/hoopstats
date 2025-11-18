@@ -1020,8 +1020,6 @@ if team_pdf is not None:
                         / df_fg.loc[mask_3, "Total 3pt Attempts"]
                     )
 
-                    # Missing / zero-attempt totals will stay 0% (0/0).
-
                     # ============================================================
                     #                       BUILD SHOT DIET DOCX
                     # ============================================================
@@ -1119,7 +1117,7 @@ if team_pdf is not None:
                     )
 
                     # ============================================================
-                    #                        BUILD FG% DOCX
+                    #                        BUILD FG% DOCX (2 COLUMNS)
                     # ============================================================
                     fg_doc = Document()
                     fg_style = fg_doc.styles["Normal"]
@@ -1139,48 +1137,89 @@ if team_pdf is not None:
                     title_p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     title_p2.paragraph_format.space_after = Pt(4)
 
-                    # 5 zone stats + total 2pt + total 3pt (6th and 7th)
-                    fg_sections = [
-                        ("FG% – At the Rim",         "At Rim FG",         "At Rim Makes",         "At Rim Attempts"),
-                        ("FG% – Paint 2s",           "In Paint FG",       "In Paint Makes",       "In Paint Attempts"),
-                        ("FG% – Midrange 2s",        "Midrange 2s FG",    "Midrange 2s Makes",    "Midrange 2s Attempts"),
-                        ("FG% – Above-the Break 3s", "Above Break 3s FG", "Above Break 3s Makes", "Above Break 3s Attempts"),
-                        ("FG% – Corner 3s",          "Corner 3s FG",      "Corner 3s Makes",      "Corner 3s Attempts"),
-                        ("FG% – Total 2pt",          "Total 2pt FG",      "Total 2pt Makes",      "Total 2pt Attempts"),
-                        ("FG% – Total 3pt",          "Total 3pt FG",      "Total 3pt Makes",      "Total 3pt Attempts"),
+                    # LEFT COLUMN = 2PT STUFF (including total 2pt)
+                    fg_left_sections = [
+                        ("FG% - At the Rim",       "At Rim FG",       "At Rim Makes",       "At Rim Attempts"),
+                        ("FG% - Paint 2s",         "In Paint FG",     "In Paint Makes",     "In Paint Attempts"),
+                        ("FG% - Mid-Range 2s",     "Midrange 2s FG",  "Midrange 2s Makes",  "Midrange 2s Attempts"),
+                        ("FG% - All 2pt Attempts", "Total 2pt FG",    "Total 2pt Makes",    "Total 2pt Attempts"),
                     ]
 
-                    for title, fg_col, make_col, att_col in fg_sections:
+                    # RIGHT COLUMN = 3PT STUFF (including total 3pt)
+                    fg_right_sections = [
+                        ("FG% – Above-the Break 3s", "Above Break 3s FG", "Above Break 3s Makes", "Above Break 3s Attempts"),
+                        ("FG% – Corner 3s",          "Corner 3s FG",      "Corner 3s Makes",      "Corner 3s Attempts"),
+                        ("FG% - All 3pt Attempts",   "Total 3pt FG",      "Total 3pt Makes",      "Total 3pt Attempts"),
+                    ]
+
+                    max_len_fg = max(len(fg_left_sections), len(fg_right_sections))
+
+                    for i in range(max_len_fg):
+                        left_sec = fg_left_sections[i] if i < len(fg_left_sections) else None
+                        right_sec = fg_right_sections[i] if i < len(fg_right_sections) else None
+
                         table = fg_doc.add_table(rows=1, cols=2)
                         remove_table_borders(table)
                         left_cell = table.rows[0].cells[0]
                         right_cell = table.rows[0].cells[1]
 
-                        # Header
-                        p = left_cell.add_paragraph()
-                        r = p.add_run(title)
-                        r.bold = True
-                        r.font.size = Pt(16)
-                        if header_color is not None:
-                            r.font.color.rgb = header_color
+                        # ---------- LEFT SIDE (2PT) ----------
+                        if left_sec is not None:
+                            title, fg_col, make_col, att_col = left_sec
 
-                        if fg_col in df_fg.columns:
-                            df_sorted = df_fg.sort_values(by=fg_col, ascending=False)
-                            for rank, (_, row_fg) in enumerate(df_sorted.iterrows(), start=1):
-                                raw_val = row_fg.get(fg_col, 0.0)
-                                makes = int(row_fg.get(make_col, 0) or 0)
-                                attempts = int(row_fg.get(att_col, 0) or 0)
+                            p = left_cell.add_paragraph()
+                            r = p.add_run(title)
+                            r.bold = True
+                            r.font.size = Pt(16)
+                            if header_color is not None:
+                                r.font.color.rgb = header_color
 
-                                # If missing or zero attempts → show 0.0% (0/0)
-                                if pd.isna(raw_val) or attempts == 0:
-                                    val_display = 0.0
-                                else:
-                                    val_display = float(raw_val)
+                            if fg_col in df_fg.columns:
+                                df_sorted = df_fg.sort_values(by=fg_col, ascending=False)
+                                for rank, (_, row_fg) in enumerate(df_sorted.iterrows(), start=1):
+                                    raw_val = row_fg.get(fg_col, 0.0)
+                                    makes = int(row_fg.get(make_col, 0) or 0)
+                                    attempts = int(row_fg.get(att_col, 0) or 0)
 
-                                jersey = str(row_fg["Jersey"]).strip()
-                                name = str(row_fg["Player"])
-                                line = f"{rank}. #{jersey} {name} – {val_display:.1f}% ({makes}/{attempts})"
-                                left_cell.add_paragraph(line)
+                                    # If missing or zero attempts → show 0.0% (0/0)
+                                    if pd.isna(raw_val) or attempts == 0:
+                                        val_display = 0.0
+                                    else:
+                                        val_display = float(raw_val)
+
+                                    jersey = str(row_fg["Jersey"]).strip()
+                                    name = str(row_fg["Player"])
+                                    line = f"{rank}. #{jersey} {name} – {val_display:.1f}% ({makes}/{attempts})"
+                                    left_cell.add_paragraph(line)
+
+                        # ---------- RIGHT SIDE (3PT) ----------
+                        if right_sec is not None:
+                            title, fg_col, make_col, att_col = right_sec
+
+                            p = right_cell.add_paragraph()
+                            r = p.add_run(title)
+                            r.bold = True
+                            r.font.size = Pt(16)
+                            if header_color is not None:
+                                r.font.color.rgb = header_color
+
+                            if fg_col in df_fg.columns:
+                                df_sorted = df_fg.sort_values(by=fg_col, ascending=False)
+                                for rank, (_, row_fg) in enumerate(df_sorted.iterrows(), start=1):
+                                    raw_val = row_fg.get(fg_col, 0.0)
+                                    makes = int(row_fg.get(make_col, 0) or 0)
+                                    attempts = int(row_fg.get(att_col, 0) or 0)
+
+                                    # If missing or zero attempts → show 0.0% (0/0)
+                                    if pd.isna(raw_val) or attempts == 0:
+                                        val_display = 0.0
+                                    else:
+                                        val_display = float(raw_val)
+
+                                    jersey = str(row_fg["Jersey"]).strip()
+                                    name = str(row_fg["Player"])
+                                    line = f"{rank}. #{jersey} {name} – {val_display:.1f}% ({makes}/{attempts})"
+                                    right_cell.add_paragraph(line)
 
                     fg_buffer = BytesIO()
                     fg_doc.save(fg_buffer)
@@ -1198,6 +1237,7 @@ else:
     st.info(
         "⬆️ Upload the CBB Analytics team player-profiles PDF to extract zone FGA% and generate Shot Diet + FG% DOCX."
     )
+
 
 # ---------- ADVANCED STATS PIPELINE ----------
 
