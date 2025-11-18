@@ -606,27 +606,79 @@ def parse_cbb_team_pdf_shooting_zones(uploaded_pdf) -> pd.DataFrame:
     return df[keep_cols]
 
 
-# ---------------- Streamlit UI ----------------
+# ---------------- Streamlit UI (cleaned & user-friendly) ----------------
 
-team_name = st.text_input(
-    "Team name for DOCX titles (REQUIRED)",
-    value="",
-    help="Shown as '<TEAM> ADVANCED STATISTICS' and '<TEAM> OVERVIEW STATISTICS' in the documents.",
+st.set_page_config(page_title="College Basketball Stats Organizer", layout="wide")
+
+st.title("KenPom & CBBAnalytics Stats Organizer")
+
+st.markdown(
+    """
+This app builds **three Word docs** from your data:
+
+1. **Advanced Stats DOCX** – from KenPom advanced/usage table  
+2. **Overview DOCX** – from CBBAnalytics overview CSV  
+3. **Shot Diet & FG% DOCX** – from CBBAnalytics *Team Player-Profiles* PDF + Overview CSV  
+
+Use the sidebar to upload files and enter your team info, then go to each tab to see previews and download the DOCX files.
+"""
 )
 
-if team_name.strip() == "":
-    st.error("❗ Team name is required.")
+# =========================
+# SIDEBAR: REQUIRED INPUTS
+# =========================
+with st.sidebar:
+    st.markdown("### ⚙️ Setup")
 
-logo_file = st.file_uploader(
-    "Upload Team Logo (REQUIRED)",
-    type=["png", "jpg", "jpeg"],
-    key="logo",
-    help="Logo will appear at the top of both DOCX files, and its darkest non-black color will be used for titles and headers.",
-)
+    team_name = st.text_input(
+        "Team name (required)",
+        value="",
+        help="Used in all DOCX titles, e.g. 'MCNEESE STATE ADVANCED STATISTICS'.",
+    )
 
-if logo_file is None:
-    st.error("❗ Team logo is required.")
+    logo_file = st.file_uploader(
+        "Team logo (required)",
+        type=["png", "jpg", "jpeg"],
+        key="logo",
+        help="Logo appears at the top of each DOCX; its darkest color is used for headers.",
+    )
 
+    st.markdown("---")
+    st.markdown("### 📂 Files")
+
+    pasted_hint = st.markdown(
+        """
+**Advanced stats (KenPom)**  
+- Paste the KenPom table in the **Advanced Stats** tab, or  
+- Upload a CSV with those stats.
+"""
+    )
+
+    overview_file = st.file_uploader(
+        "CBB Overview CSV (with `fga` column)",
+        type=["csv"],
+        help="Used to build the Overview DOCX and to compute zone makes/attempts for FG%.",
+    )
+
+    team_pdf = st.file_uploader(
+        "CBBAnalytics *Team Player-Profiles* PDF",
+        type=["pdf"],
+        key="cbb_team_pdf",
+        help="PDF with 'Shooting by Region (Full Season)' tables for Shot Diet & FG%.",
+    )
+
+    st.markdown("---")
+    st.markdown("### ✅ Checklist")
+    st.markdown(
+        f"""
+- {'✅' if team_name.strip() else '⬜️'} Team name  
+- {'✅' if logo_file is not None else '⬜️'} Team logo  
+- {'✅' if overview_file is not None else '⬜️'} Overview CSV  
+- {'✅' if team_pdf is not None else '⬜️'} Team PDF (for Shot Diet & FG%)
+"""
+    )
+
+# Process logo & header color (same as before)
 title_text = (team_name or "").strip().upper()
 safe_team_name = (title_text or "TEAM").replace(" ", "_")
 
@@ -636,6 +688,81 @@ if logo_file is not None:
     logo_bytes = logo_file.read()
     if logo_bytes:
         header_color = get_darkest_color_from_logo(logo_bytes)
+
+if not team_name.strip():
+    st.warning("➡️ Enter a **team name** in the sidebar to enable DOCX generation.")
+
+if logo_file is None:
+    st.warning("➡️ Upload a **team logo** in the sidebar to enable DOCX generation.")
+
+# =========================
+# MAIN AREA TABS
+# =========================
+tab_adv, tab_over, tab_shot = st.tabs(
+    ["📊 Advanced Stats (KenPom)", "📋 Overview (CBB)", "🎯 Shot Diet & FG% (PDF)"]
+)
+
+# =============== TAB 1: ADVANCED STATS INPUT (KENPOM) ===============
+with tab_adv:
+    st.markdown("### Advanced Stats Input (KenPom)")
+    st.markdown(
+        "Paste the **advanced/usage table** directly from KenPom, or upload a CSV with the same stats."
+    )
+
+    pasted_kenpom = st.text_area(
+        "Paste raw KenPom advanced/usage table here:",
+        height=260,
+        help="On KenPom: highlight the whole advanced/usage table → Copy → Paste here.",
+    )
+
+    uploaded_file = st.file_uploader(
+        "Or upload an Advanced Stats CSV",
+        type=["csv"],
+        help="CSV must include: ORtg, %Poss, %Shots, eFG%, TS%, OR%, DR%, ARate, TORate, Blk%, Stl%, FC/40, FD/40, FTRate",
+        key="adv_csv",
+    )
+
+    st.info(
+        "After pasting or uploading, scroll down to see the **Advanced Stats DOCX** download button once the table parses."
+    )
+
+# =============== TAB 2: OVERVIEW STATS INPUT (CBB) ===============
+with tab_over:
+    st.markdown("### Overview Stats (CBBAnalytics)")
+    st.markdown(
+        """
+The Overview CSV is used to:
+
+- Build the **Overview DOCX**  
+- Provide total **FGA** per player so the app can estimate makes/attempts by zone in the FG% DOCX  
+"""
+    )
+
+    if overview_file is None:
+        st.warning("Upload a CBB Overview CSV in the sidebar to continue.")
+    else:
+        st.success("Overview CSV uploaded. Scroll down for the Overview DOCX section.")
+
+# =============== TAB 3: SHOT DIET & FG% (PDF) ===============
+with tab_shot:
+    st.markdown("### Shot Diet & FG% (from CBBAnalytics Team PDF)")
+    st.markdown(
+        """
+This section uses the **Team Player-Profiles PDF** plus the Overview CSV (`fga` column) to:
+
+- Extract **FGA% by zone** for each player (Shot Diet)  
+- Extract **FG% by zone** for each player  
+- Estimate **makes/attempts by zone**, plus total 2pt and 3pt FG%  
+- Generate two DOCX files:
+  - **Shot Diet DOCX**  
+  - **FG% DOCX (with makes/attempts)**  
+"""
+    )
+
+    if team_pdf is None:
+        st.warning("Upload the **Team Player-Profiles PDF** in the sidebar to enable this section.")
+    if overview_file is None:
+        st.warning("Upload the **Overview CSV** in the sidebar so we can get total FGA per player.")
 
 # =========================================================
 #  ADVANCED STATS INPUT SECTION (KENPOM)
