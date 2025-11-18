@@ -1137,19 +1137,19 @@ if team_pdf is not None:
                     title_p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     title_p2.paragraph_format.space_after = Pt(4)
 
-                    # LEFT COLUMN = 2PT STUFF (including total 2pt)
+                    # LEFT COLUMN = all 2pt-related sections (incl. total 2pt)
                     fg_left_sections = [
-                        ("FG% - At the Rim",       "At Rim FG",       "At Rim Makes",       "At Rim Attempts"),
-                        ("FG% - Paint 2s",         "In Paint FG",     "In Paint Makes",     "In Paint Attempts"),
-                        ("FG% - Mid-Range 2s",     "Midrange 2s FG",  "Midrange 2s Makes",  "Midrange 2s Attempts"),
-                        ("FG% - All 2pt Attempts", "Total 2pt FG",    "Total 2pt Makes",    "Total 2pt Attempts"),
+                        ("FG% – At the Rim",         "At Rim FG",       "At Rim Makes",       "At Rim Attempts"),
+                        ("FG% – Paint 2s",           "In Paint FG",     "In Paint Makes",     "In Paint Attempts"),
+                        ("FG% – Mid-Range 2s",       "Midrange 2s FG",  "Midrange 2s Makes",  "Midrange 2s Attempts"),
+                        ("FG% – Total 2pt",          "Total 2pt FG",    "Total 2pt Makes",    "Total 2pt Attempts"),
                     ]
 
-                    # RIGHT COLUMN = 3PT STUFF (including total 3pt)
+                    # RIGHT COLUMN = all 3pt-related sections (incl. total 3pt)
                     fg_right_sections = [
                         ("FG% – Above-the Break 3s", "Above Break 3s FG", "Above Break 3s Makes", "Above Break 3s Attempts"),
                         ("FG% – Corner 3s",          "Corner 3s FG",      "Corner 3s Makes",      "Corner 3s Attempts"),
-                        ("FG% - All 3pt Attempts",   "Total 3pt FG",      "Total 3pt Makes",      "Total 3pt Attempts"),
+                        ("FG% – Total 3pt",          "Total 3pt FG",      "Total 3pt Makes",      "Total 3pt Attempts"),
                     ]
 
                     max_len_fg = max(len(fg_left_sections), len(fg_right_sections))
@@ -1237,6 +1237,7 @@ else:
     st.info(
         "⬆️ Upload the CBB Analytics team player-profiles PDF to extract zone FGA% and generate Shot Diet + FG% DOCX."
     )
+
 
 
 # ---------- ADVANCED STATS PIPELINE ----------
