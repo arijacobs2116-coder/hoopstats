@@ -7,6 +7,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from io import BytesIO
 from PIL import Image
+from PyPDF2 import PdfReader
 import re
 
 # ---------------- Streamlit page config ----------------
@@ -499,6 +500,122 @@ def get_darkest_color_from_logo(logo_bytes):
 
     return RGBColor(darkest_rgb[0], darkest_rgb[1], darkest_rgb[2])
 
+def parse_cbb_team_pdf_shooting_zones(uploaded_pdf) -> pd.DataFrame:
+    """
+    Given a CBB Analytics TEAM player-profiles PDF, extract FGA% by shot zone
+    from each player's 'Shot Zone GP* FGA/G FGA% FG%' table on their page.
+
+    Returns a DataFrame with one row per player and columns:
+      Jersey, Player,
+      FGA% At Rim, FGA% In Paint, FGA% Midrange 2s,
+      FGA% Above Break 3s, FGA% Corner 3s
+    """
+    pdf_bytes = uploaded_pdf.read()
+    reader = PdfReader(BytesIO(pdf_bytes))
+
+    rows = []
+    zones = [
+        "At Rim",
+        "In Paint",
+        "Midrange 2s",
+        "Above Break 3s",
+        "Corner 3s",
+        "At Rim + 3s",
+        "Heaves",
+    ]
+
+    for page in reader.pages:
+        try:
+            text = page.extract_text()
+        except Exception:
+            continue
+        if not text or "Shot Zone" not in text or "FGA%" not in text:
+            continue
+
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+
+        # Header line looks like: "DJ Richards (#2, Guard, 6'4") : Profile"
+        header_line = lines[0]
+        name = header_line
+        jersey = ""
+
+        m = re.match(r"^(.*?)\s*\(#(\d+)", header_line)
+        if m:
+            name = m.group(1).strip()
+            jersey = m.group(2).strip()
+        else:
+            # fallback: name before "(" if no jersey parsed cleanly
+            name = header_line.split("(")[0].strip()
+
+        # Find the "Shot Zone ... FGA%" header
+        shot_idx = None
+        for i, ln in enumerate(lines):
+            if "Shot Zone" in ln and "FGA%" in ln:
+                shot_idx = i
+                break
+        if shot_idx is None:
+            continue
+
+        # Rows following that header are the zone rows
+        fga_vals = []
+        for ln in lines[shot_idx + 1:]:
+            # Stop when we hit some other section
+            if ln.startswith("DNQ") or "Zone % of Shots" in ln or "Shot Chart" in ln:
+                break
+
+            parts = ln.split()
+            if len(parts) < 2:
+                continue
+
+            # Typical row: "<something> 33.3% 50.0%"
+            fga_token = parts[1]
+            if "%" not in fga_token:
+                continue
+
+            try:
+                v = float(fga_token.replace("%", ""))
+            except ValueError:
+                v = float("nan")
+
+            fga_vals.append(v)
+            if len(fga_vals) >= len(zones):
+                break
+
+        if not fga_vals:
+            continue
+
+        # pad if short
+        while len(fga_vals) < len(zones):
+            fga_vals.append(float("nan"))
+
+        row = {
+            "Jersey": jersey,
+            "Player": name,
+        }
+        for i, z in enumerate(zones):
+            row[f"FGA% {z}"] = fga_vals[i]
+
+        rows.append(row)
+
+    if not rows:
+        raise ValueError("No 'Shot Zone' tables found in the uploaded PDF.")
+
+    df = pd.DataFrame(rows)
+
+    # Only keep the five zones you care about
+    keep_cols = [
+        "Jersey",
+        "Player",
+        "FGA% At Rim",
+        "FGA% In Paint",
+        "FGA% Midrange 2s",
+        "FGA% Above Break 3s",
+        "FGA% Corner 3s",
+    ]
+    return df[keep_cols]
+
+
+
 
 # ---------------- Streamlit UI ----------------
 
@@ -600,6 +717,178 @@ st.markdown(
 """,
     unsafe_allow_html=True
 )
+
+st.markdown("---")
+st.subheader("CBB Analytics – Shooting by Region (Team PDF)")
+
+team_pdf = st.file_uploader(
+    "Upload CBB Analytics *Team Player-profiles* PDF (with 'Shooting by Region (Full Season)' tables)",
+    type=["pdf"],
+    key="cbb_team_pdf",
+)
+
+if team_pdf is not None:
+    if not title_text:
+        st.error("❗ Please enter a team name before generating the Shooting by Region DOCX.")
+    elif logo_bytes is None:
+        st.error("❗ Please upload a team logo before generating the Shooting by Region DOCX.")
+    else:
+        try:
+            df_shooting = parse_cbb_team_pdf_shooting_zones(team_pdf)
+        except Exception as e:
+            st.error(f"Could not extract shooting-by-region data from PDF: {e}")
+        else:
+            st.markdown("**FGA% by Shot Zone (Full Season) – All Players**")
+            st.dataframe(df_shooting, use_container_width=True)
+
+            # ---------- Build SHOOTING BY REGION DOCX ----------
+            shooting_doc = Document()
+
+            # Base font
+            style = shooting_doc.styles["Normal"]
+            font = style.font
+            font.name = "Calibri"
+            font.size = Pt(11)
+
+            # Logo at top
+            if logo_bytes:
+                logo_stream2 = BytesIO(logo_bytes)
+                shooting_doc.add_picture(logo_stream2, width=Inches(1.2))
+                last_paragraph = shooting_doc.paragraphs[-1]
+                last_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+            # Title
+            title_paragraph = shooting_doc.add_paragraph()
+            run = title_paragraph.add_run(f"{title_text} SHOOTING BY REGION")
+            run.bold = True
+            run.font.size = Pt(14)
+            if header_color is not None:
+                run.font.color.rgb = header_color
+            title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            title_paragraph.paragraph_format.space_after = Pt(4)
+
+            # Define zone categories (we'll sort players by these)
+            zone_categories = [
+                ("FGA% At Rim", "FGA% At Rim"),
+                ("FGA% In Paint", "FGA% In Paint"),
+                ("FGA% Midrange 2s", "FGA% Midrange 2s"),
+                ("FGA% Above Break 3s", "FGA% Above Break 3s"),
+                ("FGA% Corner 3s", "FGA% Corner 3s"),
+            ]
+
+            # Pair them into left/right columns
+            zone_pairs = []
+            for i in range(0, len(zone_categories), 2):
+                if i + 1 < len(zone_categories):
+                    zone_pairs.append((zone_categories[i], zone_categories[i + 1]))
+                else:
+                    zone_pairs.append((zone_categories[i], None))
+
+            for left_cat, right_cat in zone_pairs:
+                table = shooting_doc.add_table(rows=1, cols=2)
+                table.autofit = True
+                remove_table_borders(table)
+
+                left_cell = table.rows[0].cells[0]
+                right_cell = table.rows[0].cells[1]
+
+                # LEFT ZONE
+                if left_cat is not None:
+                    col, title = left_cat
+                    p = left_cell.add_paragraph()
+                    r = p.add_run(title)
+                    r.bold = True
+                    r.font.size = Pt(16)
+                    if header_color is not None:
+                        r.font.color.rgb = header_color
+                    p.paragraph_format.space_before = Pt(0)
+                    p.paragraph_format.space_after = Pt(0)
+                    p.paragraph_format.line_spacing = Pt(11)
+
+                    if col in df_shooting.columns:
+                        df_sorted = df_shooting.sort_values(by=col, ascending=False)
+                        for rank, (_, row) in enumerate(df_sorted.iterrows(), start=1):
+                            value = row[col]
+                            if pd.isna(value):
+                                continue
+                            jersey = str(row.get("Jersey", "")).strip()
+                            name = str(row["Player"])
+
+                            val_str = f"{value:.1f}%"
+
+                            label_parts = []
+                            if jersey:
+                                label_parts.append(f"#{jersey}")
+                            label_parts.append(name)
+                            label = " ".join(label_parts)
+
+                            pl = left_cell.add_paragraph()
+                            pr = pl.add_run(f"{rank}. {label} – {val_str}")
+                            pr.font.size = Pt(11)
+                            pl.paragraph_format.space_before = Pt(0)
+                            pl.paragraph_format.space_after = Pt(0)
+                            pl.paragraph_format.line_spacing = Pt(11)
+
+                # RIGHT ZONE
+                if right_cat is not None:
+                    col, title = right_cat
+                    p = right_cell.add_paragraph()
+                    r = p.add_run(title)
+                    r.bold = True
+                    r.font.size = Pt(16)
+                    if header_color is not None:
+                        r.font.color.rgb = header_color
+                    p.paragraph_format.space_before = Pt(0)
+                    p.paragraph_format.space_after = Pt(0)
+                    p.paragraph_format.line_spacing = Pt(11)
+
+                    if col in df_shooting.columns:
+                        df_sorted = df_shooting.sort_values(by=col, ascending=False)
+                        for rank, (_, row) in enumerate(df_sorted.iterrows(), start=1):
+                            value = row[col]
+                            if pd.isna(value):
+                                continue
+                            jersey = str(row.get("Jersey", "")).strip()
+                            name = str(row["Player"])
+
+                            val_str = f"{value:.1f}%"
+
+                            label_parts = []
+                            if jersey:
+                                label_parts.append(f"#{jersey}")
+                            label_parts.append(name)
+                            label = " ".join(label_parts)
+
+                            pl = right_cell.add_paragraph()
+                            pr = pl.add_run(f"{rank}. {label} – {val_str}")
+                            pr.font.size = Pt(11)
+                            pl.paragraph_format.space_before = Pt(0)
+                            pl.paragraph_format.space_after = Pt(0)
+                            pl.paragraph_format.line_spacing = Pt(11)
+
+                spacer = shooting_doc.add_paragraph()
+                spacer.paragraph_format.space_before = Pt(0)
+                spacer.paragraph_format.space_after = Pt(0)
+                spacer.paragraph_format.line_spacing = Pt(0.25)
+
+            # Download button for Shooting DOCX
+            shooting_buffer = BytesIO()
+            shooting_doc.save(shooting_buffer)
+            shooting_buffer.seek(0)
+
+            shooting_filename = f"{safe_team_name}_shooting_by_region.docx"
+
+            st.download_button(
+                label="Download Shooting by Region DOCX",
+                data=shooting_buffer,
+                file_name=shooting_filename,
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                key="download_shooting_region",
+            )
+else:
+    st.info(
+        "⬆️ Upload the CBB Analytics team player-profiles PDF to extract zone FGA% and generate a matching Shooting by Region DOCX."
+    )
 
 
 
