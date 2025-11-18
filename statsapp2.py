@@ -881,6 +881,13 @@ if team_pdf is not None:
                     "FG% Above Break 3s",
                     "FG% Corner 3s",
                 ]
+                
+                if df.empty:
+                    raise ValueError("No 'Shot Zone GP* FGA/G FGA% FG%' tables found in the PDF.")
+                for col in keep_cols:
+                    if col not in df.columns:
+                        df[col] = float("nan")
+                        
                 df = df[keep_cols].copy()
 
                 # Make FG% numeric and fill NaN with 0.0
