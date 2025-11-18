@@ -747,8 +747,46 @@ if team_pdf is not None:
         except Exception as e:
             st.error(f"Could not extract shooting-by-region data from PDF: {e}")
         else:
-            st.markdown("**FGA% by Shot Zone (Full Season) – All Players**")
-            st.dataframe(df_shooting, use_container_width=True)
+            # ---------- Compute combined 2PT and 3PT percentages ----------
+            num_cols = [
+                "FGA% At Rim",
+                "FGA% In Paint",
+                "FGA% Midrange 2s",
+                "FGA% Above Break 3s",
+                "FGA% Corner 3s",
+            ]
+            for c in num_cols:
+                df_shooting[c] = pd.to_numeric(df_shooting[c], errors="coerce")
+
+            df_shooting["FGA% All 2 PT Attempts"] = (
+                df_shooting["FGA% At Rim"]
+                + df_shooting["FGA% In Paint"]
+                + df_shooting["FGA% Midrange 2s"]
+            )
+
+            df_shooting["FGA% All 3 PT Attempts"] = (
+                df_shooting["FGA% Above Break 3s"]
+                + df_shooting["FGA% Corner 3s"]
+            )
+
+            # ---------- Build Preview Table ----------
+            preview_cols = [
+                "Jersey",
+                "Player",
+                "FGA% At Rim",
+                "FGA% In Paint",
+                "FGA% Midrange 2s",
+                "FGA% All 2 PT Attempts",
+                "FGA% Above Break 3s",
+                "FGA% Corner 3s",
+                "FGA% All 3 PT Attempts",
+            ]
+
+            df_preview = df_shooting[preview_cols]
+
+            st.markdown("### **Shot Diet Table Preview (Full Season)**")
+            st.dataframe(df_preview, use_container_width=True)
+
 
             # ---------- Add combined 2PT / 3PT categories ----------
             base_cols = [
@@ -801,16 +839,16 @@ if team_pdf is not None:
 
             # Define left/right categories
             left_zone_categories = [
-                ("FGA% At Rim", "FGA% at the Rim"),
-                ("FGA% In Paint", "FGA% in the Paint"),
-                ("FGA% Midrange 2s", "FGA% Mid-Range 2s"),
-                ("FGA% All 2 PT Attempts", "FGA% All 2 PT Attempts"),
+                ("FGA% At Rim", "FGA% -- At the Rim"),
+                ("FGA% In Paint", "FGA% -- In the Paint"),
+                ("FGA% Midrange 2s", "FGA% -- Mid-Range 2s"),
+                ("FGA% All 2 PT Attempts", "FGA% -- All 2 PT Attempts"),
             ]
 
             right_zone_categories = [
-                ("FGA% Above Break 3s", "FGA% Above the Break 3s"),
-                ("FGA% Corner 3s", "FGA% Corner 3s"),
-                ("FGA% All 3 PT Attempts", "FGA% All 3 PT Attempts"),
+                ("FGA% Above Break 3s", "FGA% -- Above the Break 3s"),
+                ("FGA% Corner 3s", "FGA% -- Corner 3s"),
+                ("FGA% All 3 PT Attempts", "FGA% -- All 3 PT Attempts"),
             ]
 
             max_rows = max(len(left_zone_categories), len(right_zone_categories))
