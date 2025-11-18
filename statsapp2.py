@@ -924,22 +924,23 @@ if team_pdf is not None:
                     #          COMPUTE ZONE MAKES / ATTEMPTS USING FGA
                     # ============================================================
                     zone_defs = [
-                        ("At Rim",         "FGA% At Rim",        "FG% At Rim"),
-                        ("In Paint",       "FGA% In Paint",      "FG% In Paint"),
-                        ("Midrange 2s",    "FGA% Midrange 2s",   "FG% Midrange 2s"),
-                        ("Above Break 3s", "FGA% Above Break 3s","FG% Above Break 3s"),
-                        ("Corner 3s",      "FGA% Corner 3s",     "FG% Corner 3s"),
+                        ("At Rim",         "FGA% At Rim",         "FG% At Rim"),
+                        ("In Paint",       "FGA% In Paint",       "FG% In Paint"),
+                        ("Midrange 2s",    "FGA% Midrange 2s",    "FG% Midrange 2s"),
+                        ("Above Break 3s", "FGA% Above Break 3s", "FG% Above Break 3s"),
+                        ("Corner 3s",      "FGA% Corner 3s",      "FG% Corner 3s"),
                     ]
 
                     # Initialize columns
                     for zone_name, _, _ in zone_defs:
                         df_fg[f"{zone_name} Attempts"] = 0
                         df_fg[f"{zone_name} Makes"] = 0
-                        df_fg[f"{zone_name} FG"] = None
+                        df_fg[f"{zone_name} FG"] = 0.0
 
                     for idx, row in df_fg.iterrows():
                         total_fga = row.get("fga", 0)
                         if pd.isna(total_fga) or total_fga <= 0:
+                            # Leave as 0 attempts / 0 makes / 0% FG
                             continue
 
                         for zone_name, fga_pct_col, fg_pct_col in zone_defs:
@@ -947,16 +948,54 @@ if team_pdf is not None:
                             fg_pct = row.get(fg_pct_col)
 
                             if pd.isna(fga_pct) or pd.isna(fg_pct):
+                                # keep 0/0 0%
                                 continue
 
                             zone_attempts = round(total_fga * (fga_pct / 100.0))
                             zone_makes = round(zone_attempts * (fg_pct / 100.0))
 
-                            df_fg.at[idx, f"{zone_name} Attempts"] = zone_attempts
-                            df_fg.at[idx, f"{zone_name} Makes"] = zone_makes
+                            df_fg.at[idx, f"{zone_name} Attempts"] = int(zone_attempts)
+                            df_fg.at[idx, f"{zone_name} Makes"] = int(zone_makes)
                             df_fg.at[idx, f"{zone_name} FG"] = (
-                                None if zone_attempts == 0 else 100.0 * zone_makes / zone_attempts
+                                0.0 if zone_attempts == 0 else 100.0 * zone_makes / zone_attempts
                             )
+
+                    # ============================================================
+                    #      TOTAL 2PT & 3PT MAKES / ATTEMPTS / FG% PER PLAYER
+                    # ============================================================
+                    # 2pt zones: At Rim, In Paint, Midrange 2s
+                    df_fg["Total 2pt Attempts"] = (
+                        df_fg["At Rim Attempts"]
+                        + df_fg["In Paint Attempts"]
+                        + df_fg["Midrange 2s Attempts"]
+                    )
+                    df_fg["Total 2pt Makes"] = (
+                        df_fg["At Rim Makes"]
+                        + df_fg["In Paint Makes"]
+                        + df_fg["Midrange 2s Makes"]
+                    )
+                    df_fg["Total 2pt FG"] = 0.0
+                    mask_2 = df_fg["Total 2pt Attempts"] > 0
+                    df_fg.loc[mask_2, "Total 2pt FG"] = (
+                        100.0 * df_fg.loc[mask_2, "Total 2pt Makes"] / df_fg.loc[mask_2, "Total 2pt Attempts"]
+                    )
+
+                    # 3pt zones: Above Break 3s, Corner 3s
+                    df_fg["Total 3pt Attempts"] = (
+                        df_fg["Above Break 3s Attempts"]
+                        + df_fg["Corner 3s Attempts"]
+                    )
+                    df_fg["Total 3pt Makes"] = (
+                        df_fg["Above Break 3s Makes"]
+                        + df_fg["Corner 3s Makes"]
+                    )
+                    df_fg["Total 3pt FG"] = 0.0
+                    mask_3 = df_fg["Total 3pt Attempts"] > 0
+                    df_fg.loc[mask_3, "Total 3pt FG"] = (
+                        100.0 * df_fg.loc[mask_3, "Total 3pt Makes"] / df_fg.loc[mask_3, "Total 3pt Attempts"]
+                    )
+
+                    # Missing / zero-attempt totals will stay 0% (0/0).
 
                     # ============================================================
                     #                       BUILD SHOT DIET DOCX
@@ -1074,12 +1113,15 @@ if team_pdf is not None:
                     title_p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     title_p2.paragraph_format.space_after = Pt(4)
 
+                    # 5 zone stats + total 2pt + total 3pt (6th and 7th)
                     fg_sections = [
-                        ("FG% – At the Rim",        "At Rim FG",        "At Rim Makes",        "At Rim Attempts"),
-                        ("FG% – Paint 2s",          "In Paint FG",      "In Paint Makes",      "In Paint Attempts"),
-                        ("FG% – Midrange 2s",       "Midrange 2s FG",   "Midrange 2s Makes",   "Midrange 2s Attempts"),
-                        ("FG% – Above-the Break 3s","Above Break 3s FG","Above Break 3s Makes","Above Break 3s Attempts"),
-                        ("FG% – Corner 3s",         "Corner 3s FG",     "Corner 3s Makes",     "Corner 3s Attempts"),
+                        ("FG% – At the Rim",         "At Rim FG",        "At Rim Makes",        "At Rim Attempts"),
+                        ("FG% – Paint 2s",           "In Paint FG",      "In Paint Makes",      "In Paint Attempts"),
+                        ("FG% – Midrange 2s",        "Midrange 2s FG",   "Midrange 2s Makes",   "Midrange 2s Attempts"),
+                        ("FG% – Above-the Break 3s", "Above Break 3s FG","Above Break 3s Makes","Above Break 3s Attempts"),
+                        ("FG% – Corner 3s",          "Corner 3s FG",     "Corner 3s Makes",     "Corner 3s Attempts"),
+                        ("FG% – Total 2pt",          "Total 2pt FG",     "Total 2pt Makes",     "Total 2pt Attempts"),
+                        ("FG% – Total 3pt",          "Total 3pt FG",     "Total 3pt Makes",     "Total 3pt Attempts"),
                     ]
 
                     for title, fg_col, make_col, att_col in fg_sections:
@@ -1099,16 +1141,19 @@ if team_pdf is not None:
                         if fg_col in df_fg.columns:
                             df_sorted = df_fg.sort_values(by=fg_col, ascending=False)
                             for rank, (_, row_fg) in enumerate(df_sorted.iterrows(), start=1):
-                                val = row_fg[fg_col]
-                                if pd.isna(val):
-                                    continue
-                                makes = int(row_fg[make_col])
-                                attempts = int(row_fg[att_col])
-                                if attempts == 0:
-                                    continue
+                                raw_val = row_fg.get(fg_col, 0.0)
+                                makes = int(row_fg.get(make_col, 0) or 0)
+                                attempts = int(row_fg.get(att_col, 0) or 0)
+
+                                # If missing or zero attempts → show 0.0% (0/0)
+                                if pd.isna(raw_val) or attempts == 0:
+                                    val_display = 0.0
+                                else:
+                                    val_display = float(raw_val)
+
                                 jersey = str(row_fg["Jersey"]).strip()
                                 name = str(row_fg["Player"])
-                                line = f"{rank}. #{jersey} {name} – {val:.1f}% ({makes}/{attempts})"
+                                line = f"{rank}. #{jersey} {name} – {val_display:.1f}% ({makes}/{attempts})"
                                 left_cell.add_paragraph(line)
 
                     fg_buffer = BytesIO()
