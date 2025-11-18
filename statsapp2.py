@@ -943,6 +943,6 @@ if overview_file is not None:
         )
 
 st.markdown(
-    "<p style='text-align: center; font-size: 12px; color: gray;'>By Ari Jacobs</p>",
+    "<p style='text-align: center; font-size: 12px; color: gray;'>©Ari Jacobs 2025</p>",
     unsafe_allow_html=True,
 )
