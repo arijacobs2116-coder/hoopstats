@@ -809,7 +809,7 @@ if team_pdf is not None:
                         text = page.extract_text()
                     except Exception:
                         continue
-                    if not text or "Shot Zone GP* FGA/G FGA% FG%" not in text:
+                    if not text or "Shot Zone" not in text or "FGA%" not in text or "FG%" not in text:
                         continue
 
                     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
