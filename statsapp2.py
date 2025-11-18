@@ -257,7 +257,7 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
                     v2 = float(tj)
                 except ValueError:
                     continue
-                if 20.0 <= v2 <= 200.0:  # ORtg range (handles 28.8 up to 180+)
+                if 20.0 <= v2 <= 200.0:  # ORtg range
                     ortg = v2
                     ortg_token_index = j
                     break
@@ -707,13 +707,10 @@ st.markdown(
 )
 
 st.markdown("---")
-st.subheader("CBB Analytics – Shooting by Region (Team PDF)")
 
-team_pdf = st.file_uploader(
-    "Upload CBB Analytics *Team Player-profiles* PDF (with 'Shooting by Region (Full Season)' tables)",
-    type=["pdf"],
-    key="cbb_team_pdf",
-)
+# =========================================================
+#  CBB Analytics – Shooting by Region (Team PDF)
+# =========================================================
 
 st.subheader("CBB Analytics – Shooting by Region (Team PDF)")
 
@@ -1023,6 +1020,8 @@ if team_pdf is not None:
                         / df_fg.loc[mask_3, "Total 3pt Attempts"]
                     )
 
+                    # Missing / zero-attempt totals will stay 0% (0/0).
+
                     # ============================================================
                     #                       BUILD SHOT DIET DOCX
                     # ============================================================
@@ -1199,135 +1198,6 @@ else:
     st.info(
         "⬆️ Upload the CBB Analytics team player-profiles PDF to extract zone FGA% and generate Shot Diet + FG% DOCX."
     )
-
-
-
-            # ================================================================
-            #                  MERGE WITH FGA FROM OVERVIEW CSV
-            # ================================================================
-if overview_file is None:
-    st.error(
-        "❗ Upload a CBB Overview CSV (with an 'fga' column) to generate the FG% DOCX with makes/attempts."
-    )
-else:
-    # Load overview with FGA
-    overview_file.seek(0)
-    try:
-        df_overview_all = load_and_clean_overview_csv(overview_file)
-    except Exception as e:
-        st.error(f"Error reading overview CSV for FGA: {e}")
-        df_overview_all = None
-
-    if df_overview_all is None or "fga" not in df_overview_all.columns:
-        st.error("❗ The Overview CSV must include an 'fga' column (total FGA per player).")
-    else:
-        df_fga = df_overview_all[["Jersey", "Player", "fga"]].copy()
-
-        # Merge: FG% by zone + FGA% by zone + FGA total
-        df_fg = df_fg_zones.merge(df_shooting, on=["Jersey", "Player"], how="left")
-        df_fg = df_fg.merge(df_fga, on=["Jersey", "Player"], how="left")
-
-        # ============================================================
-        #                         FG% PREVIEW
-        # ============================================================
-        st.markdown("### **FG% Table Preview (From Shooting by Region FG%)**")
-
-        fg_preview_cols = [
-            "Jersey",
-            "Player",
-            "FG% At Rim",
-            "FG% In Paint",
-            "FG% Midrange 2s",
-            "FG% Above Break 3s",
-            "FG% Corner 3s",
-        ]
-
-        st.dataframe(df_fg[fg_preview_cols], use_container_width=True)
-
-        # ============================================================
-        #          COMPUTE ZONE MAKES / ATTEMPTS USING FGA
-        # ============================================================
-        zone_defs = [
-            ("At Rim",         "FGA% At Rim",         "FG% At Rim"),
-            ("In Paint",       "FGA% In Paint",       "FG% In Paint"),
-            ("Midrange 2s",    "FGA% Midrange 2s",    "FG% Midrange 2s"),
-            ("Above Break 3s", "FGA% Above Break 3s", "FG% Above Break 3s"),
-            ("Corner 3s",      "FGA% Corner 3s",      "FG% Corner 3s"),
-        ]
-
-        # Initialize columns
-        for zone_name, _, _ in zone_defs:
-            df_fg[f"{zone_name} Attempts"] = 0
-            df_fg[f"{zone_name} Makes"] = 0
-            df_fg[f"{zone_name} FG"] = 0.0
-
-        for idx, row in df_fg.iterrows():
-            total_fga = row.get("fga", 0)
-            if pd.isna(total_fga) or total_fga <= 0:
-                # Leave as 0 attempts / 0 makes / 0% FG
-                continue
-
-            for zone_name, fga_pct_col, fg_pct_col in zone_defs:
-                fga_pct = row.get(fga_pct_col)
-                fg_pct = row.get(fg_pct_col)
-
-                if pd.isna(fga_pct) or pd.isna(fg_pct):
-                    # keep 0/0 0%
-                    continue
-
-                zone_attempts = round(total_fga * (fga_pct / 100.0))
-                zone_makes = round(zone_attempts * (fg_pct / 100.0))
-
-                df_fg.at[idx, f"{zone_name} Attempts"] = int(zone_attempts)
-                df_fg.at[idx, f"{zone_name} Makes"] = int(zone_makes)
-                df_fg.at[idx, f"{zone_name} FG"] = (
-                    0.0 if zone_attempts == 0
-                    else 100.0 * zone_makes / zone_attempts
-                )
-
-        # ============================================================
-        #      TOTAL 2PT & 3PT MAKES / ATTEMPTS / FG% PER PLAYER
-        # ============================================================
-        # 2pt zones: At Rim, In Paint, Midrange 2s
-        df_fg["Total 2pt Attempts"] = (
-            df_fg["At Rim Attempts"]
-            + df_fg["In Paint Attempts"]
-            + df_fg["Midrange 2s Attempts"]
-        )
-        df_fg["Total 2pt Makes"] = (
-            df_fg["At Rim Makes"]
-            + df_fg["In Paint Makes"]
-            + df_fg["Midrange 2s Makes"]
-        )
-        df_fg["Total 2pt FG"] = 0.0
-        mask_2 = df_fg["Total 2pt Attempts"] > 0
-        df_fg.loc[mask_2, "Total 2pt FG"] = (
-            100.0
-            * df_fg.loc[mask_2, "Total 2pt Makes"]
-            / df_fg.loc[mask_2, "Total 2pt Attempts"]
-        )
-
-        # 3pt zones: Above Break 3s, Corner 3s
-        df_fg["Total 3pt Attempts"] = (
-            df_fg["Above Break 3s Attempts"]
-            + df_fg["Corner 3s Attempts"]
-        )
-        df_fg["Total 3pt Makes"] = (
-            df_fg["Above Break 3s Makes"]
-            + df_fg["Corner 3s Makes"]
-        )
-        df_fg["Total 3pt FG"] = 0.0
-        mask_3 = df_fg["Total 3pt Attempts"] > 0
-        df_fg.loc[mask_3, "Total 3pt FG"] = (
-            100.0
-            * df_fg.loc[mask_3, "Total 3pt Makes"]
-            / df_fg.loc[mask_3, "Total 3pt Attempts"]
-        )
-
-        # Missing / zero-attempt totals will stay 0% (0/0).
-        # (Your Shot Diet + FG% DOCX build code continues here…)
-
-
 
 # ---------- ADVANCED STATS PIPELINE ----------
 
