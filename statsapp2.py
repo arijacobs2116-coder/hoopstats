@@ -1133,10 +1133,30 @@ if team_pdf is not None:
         except Exception as e:
             st.error(f"Error reading FG% PDF: {e}")
         else:
+            # ---------------------- PREVIEW TABLE ----------------------
             st.subheader("Extracted FG% Fractions")
             st.dataframe(df_fg, use_container_width=True)
 
-            # Build DOCX here in Section H
+            # ---------------------- BUILD DOCX -------------------------
+            doc = build_fg_docx(df_fg, title_text, logo_bytes, header_color)
+
+            fg_buf = BytesIO()
+            doc.save(fg_buf)
+            fg_buf.seek(0)
+
+            st.download_button(
+                "Download FG% By Region DOCX",
+                data=fg_buf,
+                file_name=f"{safe_team_name}_fg_by_region.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                key="fg_docx_dl"
+            )
+
+
+# ==========================================================
+# FG% DOC BUILDER MUST BE DEFINED BELOW OR ABOVE — NOT INSIDE
+# ==========================================================
+
 from docx import Document
 from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -1198,10 +1218,12 @@ def build_fg_docx(df_fg, team_name, logo_bytes, header_color):
                 r.font.color.rgb = header_color
 
             df_sorted = df_fg.sort_values(by=col, key=lambda x: x.fillna("0/0"), ascending=False)
+
             for idx, row in enumerate(df_sorted.itertuples(), 1):
                 val = getattr(row, col)
                 if not val:
                     continue
+                
                 pl = cell.add_paragraph()
                 label = f"{idx}. #{row.Jersey} {row.Player} – {val}"
                 pr = pl.add_run(label)
@@ -1211,18 +1233,6 @@ def build_fg_docx(df_fg, team_name, logo_bytes, header_color):
 
     return doc
 
-doc = build_fg_docx(df_fg, title_text, logo_bytes, header_color)
-buf = BytesIO()
-doc.save(buf)
-buf.seek(0)
-
-st.download_button(
-    "Download FG% By Region DOCX",
-    data=buf,
-    file_name=f"{safe_team_name}_fg_by_region.docx",
-    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    key="fg_docx_dl"
-)
 
 
 # ---------- ADVANCED STATS PIPELINE ----------
