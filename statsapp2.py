@@ -781,7 +781,7 @@ if team_pdf is not None:
             # ================================================================
             #          SIMPLE FG% PARSE FROM SHOT ZONE TABLE (PDF)
             # ================================================================
-            def parse_cbb_team_pdf_fg_zones(uploaded_pdf: BytesIO) -> pd.DataFrame:
+            def parse_cbb_team_pdf_fg_zones(uploaded_pdf) -> pd.DataFrame:
                 """
                 Reads the same CBB Analytics team PDF and extracts
                 FG% by region for each player from the
@@ -838,7 +838,7 @@ if team_pdf is not None:
 
                     fg_vals = []
 
-                    for ln in lines[shot_idx + 1 :]:
+                    for ln in lines[shot_idx + 1:]:
                         # stop when we hit DNQ / next section
                         if ln.startswith("DNQ") or "Zone % of Shots" in ln or "Zone FG%" in ln:
                             break
@@ -1023,13 +1023,183 @@ if team_pdf is not None:
                         / df_fg.loc[mask_3, "Total 3pt Attempts"]
                     )
 
-                    # (DOCX-building code for Shot Diet + FG% goes here,
-                    # using df_shooting and df_fg exactly as in the previous
-                    # snippet we wrote.)
+                    # ============================================================
+                    #                       BUILD SHOT DIET DOCX
+                    # ============================================================
+                    shooting_doc = Document()
+                    style = shooting_doc.styles["Normal"]
+                    font = style.font
+                    font.name = "Calibri"
+                    font.size = Pt(11)
+
+                    if logo_bytes:
+                        logo_stream = BytesIO(logo_bytes)
+                        shooting_doc.add_picture(logo_stream, width=Inches(1.2))
+                        shooting_doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+                    title_paragraph = shooting_doc.add_paragraph()
+                    run = title_paragraph.add_run(f"{title_text} SHOT DIET")
+                    run.bold = True
+                    run.font.size = Pt(14)
+                    if header_color is not None:
+                        run.font.color.rgb = header_color
+                    title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    title_paragraph.paragraph_format.space_after = Pt(4)
+
+                    left_zone_categories = [
+                        ("FGA% At Rim", "FGA% -- At the Rim"),
+                        ("FGA% In Paint", "FGA% -- In the Paint"),
+                        ("FGA% Midrange 2s", "FGA% -- Mid-Range 2s"),
+                        ("FGA% All 2 PT Attempts", "FGA% -- All 2 PT Attempts"),
+                    ]
+                    right_zone_categories = [
+                        ("FGA% Above Break 3s", "FGA% -- Above the Break 3s"),
+                        ("FGA% Corner 3s", "FGA% -- Corner 3s"),
+                        ("FGA% All 3 PT Attempts", "FGA% -- All 3 PT Attempts"),
+                    ]
+
+                    max_rows = max(len(left_zone_categories), len(right_zone_categories))
+
+                    for i in range(max_rows):
+                        left_cat = left_zone_categories[i] if i < len(left_zone_categories) else None
+                        right_cat = right_zone_categories[i] if i < len(right_zone_categories) else None
+
+                        table = shooting_doc.add_table(rows=1, cols=2)
+                        table.autofit = True
+                        remove_table_borders(table)
+
+                        left_cell = table.rows[0].cells[0]
+                        right_cell = table.rows[0].cells[1]
+
+                        # LEFT side
+                        if left_cat is not None:
+                            col, ttl = left_cat
+                            p = left_cell.add_paragraph()
+                            r = p.add_run(ttl)
+                            r.bold = True
+                            r.font.size = Pt(16)
+                            if header_color is not None:
+                                r.font.color.rgb = header_color
+
+                            if col in df_shooting.columns:
+                                df_sorted = df_shooting.sort_values(by=col, ascending=False)
+                                for rank, (_, row_s) in enumerate(df_sorted.iterrows(), start=1):
+                                    val_str = f"{row_s[col]:.1f}%"
+                                    jersey = str(row_s["Jersey"]).strip()
+                                    name = str(row_s["Player"])
+                                    left_cell.add_paragraph(f"{rank}. #{jersey} {name} – {val_str}")
+
+                        # RIGHT side
+                        if right_cat is not None:
+                            col, ttl = right_cat
+                            p = right_cell.add_paragraph()
+                            r = p.add_run(ttl)
+                            r.bold = True
+                            r.font.size = Pt(16)
+                            if header_color is not None:
+                                r.font.color.rgb = header_color
+
+                            if col in df_shooting.columns:
+                                df_sorted = df_shooting.sort_values(by=col, ascending=False)
+                                for rank, (_, row_s) in enumerate(df_sorted.iterrows(), start=1):
+                                    val_str = f"{row_s[col]:.1f}%"
+                                    jersey = str(row_s["Jersey"]).strip()
+                                    name = str(row_s["Player"])
+                                    right_cell.add_paragraph(f"{rank}. #{jersey} {name} – {val_str}")
+
+                    shooting_buffer = BytesIO()
+                    shooting_doc.save(shooting_buffer)
+                    shooting_buffer.seek(0)
+
+                    st.download_button(
+                        "Download Shot Diet DOCX",
+                        data=shooting_buffer,
+                        file_name=f"{safe_team_name}_shot_diet.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        key="download_shot_diet",
+                    )
+
+                    # ============================================================
+                    #                        BUILD FG% DOCX
+                    # ============================================================
+                    fg_doc = Document()
+                    fg_style = fg_doc.styles["Normal"]
+                    fg_style.font.name = "Calibri"
+                    fg_style.font.size = Pt(11)
+
+                    if logo_bytes:
+                        fg_doc.add_picture(BytesIO(logo_bytes), width=Inches(1.2))
+                        fg_doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+                    title_p2 = fg_doc.add_paragraph()
+                    r = title_p2.add_run(f"{title_text} FG%")
+                    r.bold = True
+                    r.font.size = Pt(14)
+                    if header_color is not None:
+                        r.font.color.rgb = header_color
+                    title_p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    title_p2.paragraph_format.space_after = Pt(4)
+
+                    # 5 zone stats + total 2pt + total 3pt (6th and 7th)
+                    fg_sections = [
+                        ("FG% – At the Rim",         "At Rim FG",         "At Rim Makes",         "At Rim Attempts"),
+                        ("FG% – Paint 2s",           "In Paint FG",       "In Paint Makes",       "In Paint Attempts"),
+                        ("FG% – Midrange 2s",        "Midrange 2s FG",    "Midrange 2s Makes",    "Midrange 2s Attempts"),
+                        ("FG% – Above-the Break 3s", "Above Break 3s FG", "Above Break 3s Makes", "Above Break 3s Attempts"),
+                        ("FG% – Corner 3s",          "Corner 3s FG",      "Corner 3s Makes",      "Corner 3s Attempts"),
+                        ("FG% – Total 2pt",          "Total 2pt FG",      "Total 2pt Makes",      "Total 2pt Attempts"),
+                        ("FG% – Total 3pt",          "Total 3pt FG",      "Total 3pt Makes",      "Total 3pt Attempts"),
+                    ]
+
+                    for title, fg_col, make_col, att_col in fg_sections:
+                        table = fg_doc.add_table(rows=1, cols=2)
+                        remove_table_borders(table)
+                        left_cell = table.rows[0].cells[0]
+                        right_cell = table.rows[0].cells[1]
+
+                        # Header
+                        p = left_cell.add_paragraph()
+                        r = p.add_run(title)
+                        r.bold = True
+                        r.font.size = Pt(16)
+                        if header_color is not None:
+                            r.font.color.rgb = header_color
+
+                        if fg_col in df_fg.columns:
+                            df_sorted = df_fg.sort_values(by=fg_col, ascending=False)
+                            for rank, (_, row_fg) in enumerate(df_sorted.iterrows(), start=1):
+                                raw_val = row_fg.get(fg_col, 0.0)
+                                makes = int(row_fg.get(make_col, 0) or 0)
+                                attempts = int(row_fg.get(att_col, 0) or 0)
+
+                                # If missing or zero attempts → show 0.0% (0/0)
+                                if pd.isna(raw_val) or attempts == 0:
+                                    val_display = 0.0
+                                else:
+                                    val_display = float(raw_val)
+
+                                jersey = str(row_fg["Jersey"]).strip()
+                                name = str(row_fg["Player"])
+                                line = f"{rank}. #{jersey} {name} – {val_display:.1f}% ({makes}/{attempts})"
+                                left_cell.add_paragraph(line)
+
+                    fg_buffer = BytesIO()
+                    fg_doc.save(fg_buffer)
+                    fg_buffer.seek(0)
+
+                    st.download_button(
+                        "Download FG% DOCX",
+                        data=fg_buffer,
+                        file_name=f"{safe_team_name}_fg_percentages.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        key="download_fg_percentages",
+                    )
+
 else:
     st.info(
         "⬆️ Upload the CBB Analytics team player-profiles PDF to extract zone FGA% and generate Shot Diet + FG% DOCX."
     )
+
 
 
             # ================================================================
