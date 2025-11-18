@@ -883,7 +883,7 @@ if team_pdf is not None:
                 ]
                 
                 if df.empty:
-                    raise ValueError("No 'Shot Zone GP* FGA/G FGA% FG%' tables found in the PDF.")
+                    df = pd.DataFrame(columns=keep_cols)
                 for col in keep_cols:
                     if col not in df.columns:
                         df[col] = float("nan")
