@@ -742,25 +742,26 @@ if team_pdf is not None:
     elif logo_bytes is None:
         st.error("❗ Please upload a team logo before generating the Shot Diet and FG% DOCX files.")
     else:
+
         # ================================================================
-        #  READ PDF + EXTRACT ZONE FGA%
+        #  READ PDF + EXTRACT ZONE FGA% TABLE
         # ================================================================
-        # Reset pointer before first read
-        team_pdf.seek(0)       
+        team_pdf.seek(0)
         try:
             df_shooting = parse_cbb_team_pdf_shooting_zones(team_pdf)
         except Exception as e:
             st.error(f"Could not extract shooting-by-region data from PDF: {e}")
         else:
+
             # ---------- Clean numeric ----------
-            num_cols = [
+            zone_fga_cols = [
                 "FGA% At Rim",
                 "FGA% In Paint",
                 "FGA% Midrange 2s",
                 "FGA% Above Break 3s",
                 "FGA% Corner 3s",
             ]
-            for c in num_cols:
+            for c in zone_fga_cols:
                 df_shooting[c] = pd.to_numeric(df_shooting[c], errors="coerce")
 
             df_shooting["FGA% All 2 PT Attempts"] = (
@@ -776,7 +777,9 @@ if team_pdf is not None:
             # ================================================================
             #                      SHOT DIET PREVIEW
             # ================================================================
-            preview_cols = [
+            st.markdown("### **Shot Diet Table Preview (Full Season)**")
+
+            shot_preview_cols = [
                 "Jersey",
                 "Player",
                 "FGA% At Rim",
@@ -788,62 +791,65 @@ if team_pdf is not None:
                 "FGA% All 3 PT Attempts",
             ]
 
-            df_preview = df_shooting[preview_cols]
-
-            st.markdown("### **Shot Diet Table Preview (Full Season)**")
-            st.dataframe(df_preview, use_container_width=True)
+            st.dataframe(df_shooting[shot_preview_cols], use_container_width=True)
 
             # ================================================================
-            #         EXTRACT 2s / 3s (makes & attempts) FROM PDF
+            #                EXTRACT 2s/3s MAKES & ATTEMPTS FROM PDF
             # ================================================================
             import re
-            # Reset pointer before second read
             team_pdf.seek(0)
             pdf_bytes = team_pdf.read()
             reader = PdfReader(BytesIO(pdf_bytes))
 
-            def parse_two_three_point_lines(text):
-                """
-                Extracts:
-                  2s: 45/100
-                  3s: 30/90
-                Returns jersey → dict with 2m,2a,3m,3a
-                """
-                lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-                header = lines[0]
-                m = re.search(r"\(#(\d+)", header)
-                jersey = m.group(1) if m else ""
-                out = {jersey: {"2m": None, "2a": None, "3m": None, "3a": None}}
+            attempts_map = {}
 
-                for ln in lines:
-                    m2 = re.search(r"2s:\s*(\d+)\s*/\s*(\d+)", ln, flags=re.I)
-                    if m2:
-                        out[jersey]["2m"] = int(m2.group(1))
-                        out[jersey]["2a"] = int(m2.group(2))
-
-                    m3 = re.search(r"3s:\s*(\d+)\s*/\s*(\d+)", ln, flags=re.I)
-                    if m3:
-                        out[jersey]["3m"] = int(m3.group(1))
-                        out[jersey]["3a"] = int(m3.group(2))
-
-                return out
-
-            makes_attempts_map = {}
+            pat_2s = re.compile(r"2s:\s*(\d+)\s*/\s*(\d+)")
+            pat_3s = re.compile(r"3s:\s*(\d+)\s*/\s*(\d+)")
 
             for page in reader.pages:
                 try:
-                    txt = page.extract_text()
+                    text = page.extract_text()
                 except:
                     continue
-                if not txt:
+                if not text:
                     continue
 
-                if "2s:" in txt or "3s:" in txt:
-                    parsed = parse_two_three_point_lines(txt)
-                    makes_attempts_map.update(parsed)
+                if "(#" not in text:
+                    continue
+                lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+
+                header = lines[0]
+                m = re.search(r"\(#(\d+)\)", header)
+                if not m:
+                    continue
+                jersey = m.group(1)
+
+                two_attempts = None
+                two_makes = None
+                three_attempts = None
+                three_makes = None
+
+                for ln in lines:
+                    m2 = pat_2s.search(ln)
+                    if m2:
+                        two_makes = int(m2.group(1))
+                        two_attempts = int(m2.group(2))
+
+                    m3 = pat_3s.search(ln)
+                    if m3:
+                        three_makes = int(m3.group(1))
+                        three_attempts = int(m3.group(2))
+
+                if two_attempts is not None or three_attempts is not None:
+                    attempts_map[jersey] = {
+                        "2m": two_makes,
+                        "2a": two_attempts,
+                        "3m": three_makes,
+                        "3a": three_attempts
+                    }
 
             # ================================================================
-            #          BUILD FG% DATAFRAME FROM FGA% + MAKES/ATTEMPTS
+            #              BUILD FG% DATAFRAME (Zone Makes/Attempts)
             # ================================================================
             df_fg = df_shooting.copy()
 
@@ -853,15 +859,13 @@ if team_pdf is not None:
             df_fg["3A"] = None
 
             for idx, row in df_fg.iterrows():
-                jersey = str(row["Jersey"]).strip()
-                if jersey in makes_attempts_map:
-                    vals = makes_attempts_map[jersey]
-                    df_fg.at[idx, "2M"] = vals["2m"]
-                    df_fg.at[idx, "2A"] = vals["2a"]
-                    df_fg.at[idx, "3M"] = vals["3m"]
-                    df_fg.at[idx, "3A"] = vals["3a"]
+                j = str(row["Jersey"])
+                if j in attempts_map:
+                    df_fg.at[idx, "2M"] = attempts_map[j]["2m"]
+                    df_fg.at[idx, "2A"] = attempts_map[j]["2a"]
+                    df_fg.at[idx, "3M"] = attempts_map[j]["3m"]
+                    df_fg.at[idx, "3A"] = attempts_map[j]["3a"]
 
-            # Zone definitions
             zone_2pt = [
                 ("FGA% At Rim", "At Rim"),
                 ("FGA% In Paint", "In Paint"),
@@ -872,60 +876,50 @@ if team_pdf is not None:
                 ("FGA% Corner 3s", "Corner 3s"),
             ]
 
-            # Create output columns
-            for _, label in zone_2pt:
-                df_fg[f"{label} Attempts"] = None
-                df_fg[f"{label} Makes"] = None
+            # Create FG% columns
+            for _, label in zone_2pt + zone_3pt:
+                df_fg[f"{label} Attempts"] = 0
+                df_fg[f"{label} Makes"] = 0
                 df_fg[f"{label} FG%"] = None
 
-            for _, label in zone_3pt:
-                df_fg[f"{label} Attempts"] = None
-                df_fg[f"{label} Makes"] = None
-                df_fg[f"{label} FG%"] = None
-
-            # Do math
+            # Zone-level calculations
             for idx, row in df_fg.iterrows():
-                # ------ 2PT ------
+
+                # 2PT zones
                 if pd.notna(row["2A"]) and row["2A"] > 0:
                     totalA = row["2A"]
-                    totalM = row["2M"]
-                    make_ratio = totalM / totalA if totalA > 0 else 0
+                    make_ratio = row["2M"] / totalA if totalA > 0 else 0
 
-                    for col, label in zone_2pt:
+                    for col, lab in zone_2pt:
                         pct = row[col]
                         if pd.isna(pct):
                             continue
-                        attempts_zone = round(totalA * (pct / 100))
-                        makes_zone = round(attempts_zone * make_ratio)
+                        att = round(totalA * (pct / 100))
+                        mk = round(att * make_ratio)
+                        df_fg.at[idx, f"{lab} Attempts"] = att
+                        df_fg.at[idx, f"{lab} Makes"] = mk
+                        df_fg.at[idx, f"{lab} FG%"] = None if att == 0 else 100 * mk / att
 
-                        df_fg.at[idx, f"{label} Attempts"] = attempts_zone
-                        df_fg.at[idx, f"{label} Makes"] = makes_zone
-                        df_fg.at[idx, f"{label} FG%"] = (
-                            None if attempts_zone == 0 else 100 * makes_zone / attempts_zone
-                        )
-
-                # ------ 3PT ------
+                # 3PT zones
                 if pd.notna(row["3A"]) and row["3A"] > 0:
                     totalA = row["3A"]
-                    totalM = row["3M"]
-                    make_ratio = totalM / totalA if totalA > 0 else 0
+                    make_ratio = row["3M"] / totalA if totalA > 0 else 0
 
-                    for col, label in zone_3pt:
+                    for col, lab in zone_3pt:
                         pct = row[col]
                         if pd.isna(pct):
                             continue
-                        attempts_zone = round(totalA * (pct / 100))
-                        makes_zone = round(attempts_zone * make_ratio)
-
-                        df_fg.at[idx, f"{label} Attempts"] = attempts_zone
-                        df_fg.at[idx, f"{label} Makes"] = makes_zone
-                        df_fg.at[idx, f"{label} FG%"] = (
-                            None if attempts_zone == 0 else 100 * makes_zone / attempts_zone
-                        )
+                        att = round(totalA * (pct / 100))
+                        mk = round(att * make_ratio)
+                        df_fg.at[idx, f"{lab} Attempts"] = att
+                        df_fg.at[idx, f"{lab} Makes"] = mk
+                        df_fg.at[idx, f"{lab} FG%"] = None if att == 0 else 100 * mk / att
 
             # ================================================================
-            #                        FG% PREVIEW TABLE
+            #                       FG% PREVIEW TABLE
             # ================================================================
+            st.markdown("### **FG% Table Preview (Based on FGA% + Makes/Attempts)**")
+
             fg_preview_cols = [
                 "Jersey",
                 "Player",
@@ -934,11 +928,10 @@ if team_pdf is not None:
                 "Midrange 2s Makes", "Midrange 2s Attempts", "Midrange 2s FG%",
                 "Above Break 3s Makes", "Above Break 3s Attempts", "Above Break 3s FG%",
                 "Corner 3s Makes", "Corner 3s Attempts", "Corner 3s FG%",
-                "2M", "2A",        # total 2PT
-                "3M", "3A",        # total 3PT
+                "2M", "2A",
+                "3M", "3A",
             ]
 
-            st.markdown("### **FG% Table Preview (Based on FGA% + Makes/Attempts)**")
             st.dataframe(df_fg[fg_preview_cols], use_container_width=True)
 
             # ================================================================
@@ -946,202 +939,144 @@ if team_pdf is not None:
             # ================================================================
             shooting_doc = Document()
             style = shooting_doc.styles["Normal"]
-            font = style.font
-            font.name = "Calibri"
-            font.size = Pt(11)
+            style.font.name = "Calibri"
+            style.font.size = Pt(11)
 
             if logo_bytes:
-                logo_stream = BytesIO(logo_bytes)
-                shooting_doc.add_picture(logo_stream, width=Inches(1.2))
+                shooting_doc.add_picture(BytesIO(logo_bytes), width=Inches(1.2))
                 shooting_doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-            title_p = shooting_doc.add_paragraph()
-            r = title_p.add_run(f"{title_text} SHOT DIET")
-            r.bold = True
-            r.font.size = Pt(14)
+            tp = shooting_doc.add_paragraph()
+            run = tp.add_run(f"{title_text} SHOT DIET")
+            run.bold = True
+            run.font.size = Pt(14)
             if header_color:
-                r.font.color.rgb = header_color
-            title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                run.font.color.rgb = header_color
+            tp.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-            left_zone_categories = [
+            left_zones = [
                 ("FGA% At Rim", "FGA% -- At the Rim"),
                 ("FGA% In Paint", "FGA% -- In the Paint"),
                 ("FGA% Midrange 2s", "FGA% -- Mid-Range 2s"),
                 ("FGA% All 2 PT Attempts", "FGA% -- All 2 PT Attempts"),
             ]
-            right_zone_categories = [
+            right_zones = [
                 ("FGA% Above Break 3s", "FGA% -- Above the Break 3s"),
                 ("FGA% Corner 3s", "FGA% -- Corner 3s"),
                 ("FGA% All 3 PT Attempts", "FGA% -- All 3 PT Attempts"),
             ]
 
-            max_rows = max(len(left_zone_categories), len(right_zone_categories))
+            max_rows = max(len(left_zones), len(right_zones))
 
             for i in range(max_rows):
-                left_cat = left_zone_categories[i] if i < len(left_zone_categories) else None
-                right_cat = right_zone_categories[i] if i < len(right_zone_categories) else None
+                left = left_zones[i] if i < len(left_zones) else None
+                right = right_zones[i] if i < len(right_zones) else None
 
-                table = shooting_doc.add_table(rows=1, cols=2)
-                table.autofit = True
-                remove_table_borders(table)
+                tbl = shooting_doc.add_table(rows=1, cols=2)
+                remove_table_borders(tbl)
+                lc = tbl.rows[0].cells[0]
+                rc = tbl.rows[0].cells[1]
 
-                lc = table.rows[0].cells[0]
-                rc = table.rows[0].cells[1]
-
-                # LEFT
-                if left_cat:
-                    col, ttl = left_cat
+                if left:
+                    col, title = left
                     p = lc.add_paragraph()
-                    r = p.add_run(ttl)
-                    r.bold = True
-                    r.font.size = Pt(16)
+                    rr = p.add_run(title)
+                    rr.bold = True
+                    rr.font.size = Pt(16)
                     if header_color:
-                        r.font.color.rgb = header_color
+                        rr.font.color.rgb = header_color
+                    df_sorted = df_shooting.sort_values(by=col, ascending=False)
+                    for rank, (_, row) in enumerate(df_sorted.iterrows(), start=1):
+                        lc.add_paragraph(f"{rank}. #{row['Jersey']} {row['Player']} – {row[col]:.1f}%")
 
-                    if col in df_shooting.columns:
-                        df_sorted = df_shooting.sort_values(by=col, ascending=False)
-                        for rank, (_, row) in enumerate(df_sorted.iterrows(), start=1):
-                            val_str = f"{row[col]:.1f}%"
-                            jersey = str(row["Jersey"])
-                            name = row["Player"]
-                            lc.add_paragraph(f"{rank}. #{jersey} {name} – {val_str}")
-
-                # RIGHT
-                if right_cat:
-                    col, ttl = right_cat
+                if right:
+                    col, title = right
                     p = rc.add_paragraph()
-                    r = p.add_run(ttl)
-                    r.bold = True
-                    r.font.size = Pt(16)
+                    rr = p.add_run(title)
+                    rr.bold = True
+                    rr.font.size = Pt(16)
                     if header_color:
-                        r.font.color.rgb = header_color
+                        rr.font.color.rgb = header_color
+                    df_sorted = df_shooting.sort_values(by=col, ascending=False)
+                    for rank, (_, row) in enumerate(df_sorted.iterrows(), start=1):
+                        rc.add_paragraph(f"{rank}. #{row['Jersey']} {row['Player']} – {row[col]:.1f}%")
 
-                    if col in df_shooting.columns:
-                        df_sorted = df_shooting.sort_values(by=col, ascending=False)
-                        for rank, (_, row) in enumerate(df_sorted.iterrows(), start=1):
-                            val_str = f"{row[col]:.1f}%"
-                            jersey = str(row["Jersey"])
-                            name = row["Player"]
-                            rc.add_paragraph(f"{rank}. #{jersey} {name} – {val_str}")
-
-            shooting_buf = BytesIO()
-            shooting_doc.save(shooting_buf)
-            shooting_buf.seek(0)
+            buf1 = BytesIO()
+            shooting_doc.save(buf1)
+            buf1.seek(0)
 
             st.download_button(
                 "Download Shot Diet DOCX",
-                data=shooting_buf,
+                data=buf1,
                 file_name=f"{safe_team_name}_shot_diet.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             )
 
             # ================================================================
-            #                      BUILD FG% DOCX
+            #                       BUILD FG% DOCX
             # ================================================================
             fg_doc = Document()
-            style = fg_doc.styles["Normal"]
-            font = style.font
-            font.name = "Calibri"
-            font.size = Pt(11)
+            fg_style = fg_doc.styles["Normal"]
+            fg_style.font.name = "Calibri"
+            fg_style.font.size = Pt(11)
 
             if logo_bytes:
-                logo_stream2 = BytesIO(logo_bytes)
-                fg_doc.add_picture(logo_stream2, width=Inches(1.2))
+                fg_doc.add_picture(BytesIO(logo_bytes), width=Inches(1.2))
                 fg_doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-            title_p2 = fg_doc.add_paragraph()
-            r = title_p2.add_run(f"{title_text} FG%")
-            r.bold = True
-            r.font.size = Pt(14)
+            p2 = fg_doc.add_paragraph()
+            rr = p2.add_run(f"{title_text} FG%")
+            rr.bold = True
+            rr.font.size = Pt(14)
             if header_color:
-                r.font.color.rgb = header_color
-            title_p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                rr.font.color.rgb = header_color
+            p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-            fg_left = [
-                ("At Rim FG%", "At Rim"),
-                ("In Paint FG%", "In Paint"),
-                ("Midrange 2s FG%", "Midrange 2s"),
-            ]
-            fg_right = [
-                ("Above Break 3s FG%", "Above Break 3s"),
-                ("Corner 3s FG%", "Corner 3s"),
+            fg_categories = [
+                ("FG% – At the Rim", "At Rim"),
+                ("FG% – Paint 2s", "In Paint"),
+                ("FG% – Midrange 2s", "Midrange 2s"),
+                ("FG% – Above-the Break 3s", "Above Break 3s"),
+                ("FG% – Corner 3s", "Corner 3s"),
             ]
 
-            maxfg = max(len(fg_left), len(fg_right))
+            for cat_title, lab in fg_categories:
 
-            for i in range(maxfg):
-                left_cat = fg_left[i] if i < len(fg_left) else None
-                right_cat = fg_right[i] if i < len(fg_right) else None
+                tbl = fg_doc.add_table(rows=1, cols=2)
+                remove_table_borders(tbl)
+                lc = tbl.rows[0].cells[0]
+                rc = tbl.rows[0].cells[1]
 
-                table = fg_doc.add_table(rows=1, cols=2)
-                remove_table_borders(table)
-                lc = table.rows[0].cells[0]
-                rc = table.rows[0].cells[1]
+                p = lc.add_paragraph()
+                r = p.add_run(cat_title)
+                r.bold = True
+                r.font.size = Pt(16)
+                if header_color:
+                    r.font.color.rgb = header_color
 
-                # LEFT FG%
-                if left_cat:
-                    col, label = left_cat
-                    p = lc.add_paragraph()
-                    r = p.add_run(label)
-                    r.bold = True
-                    r.font.size = Pt(16)
-                    if header_color:
-                        r.font.color.rgb = header_color
+                df_sorted = df_fg.sort_values(by=f"{lab} FG%", ascending=False)
 
-                    df_sorted = df_fg.sort_values(by=col, ascending=False)
+                for rank, (_, row) in enumerate(df_sorted.iterrows(), start=1):
+                    val = row[f"{lab} FG%"]
+                    if pd.isna(val):
+                        continue
+                    makes = int(row[f"{lab} Makes"])
+                    attempts = int(row[f"{lab} Attempts"])
+                    lc.add_paragraph(f"{rank}. #{row['Jersey']} {row['Player']} – {val:.1f}% ({makes}/{attempts})")
 
-                    for rank, (_, row) in enumerate(df_sorted.iterrows(), start=1):
-                        val = row[col]
-                        if pd.isna(val):
-                            continue
-                        makes = int(row[f"{label} Makes"])
-                        attempts = int(row[f"{label} Attempts"])
-                        jersey = row["Jersey"]
-                        name = row["Player"]
-                        lc.add_paragraph(
-                            f"{rank}. #{jersey} {name} – {val:.1f}% ({makes}/{attempts})"
-                        )
-
-                # RIGHT FG%
-                if right_cat:
-                    col, label = right_cat
-                    p = rc.add_paragraph()
-                    r = p.add_run(label)
-                    r.bold = True
-                    r.font.size = Pt(16)
-                    if header_color:
-                        r.font.color.rgb = header_color
-
-                    df_sorted = df_fg.sort_values(by=col, ascending=False)
-
-                    for rank, (_, row) in enumerate(df_sorted.iterrows(), start=1):
-                        val = row[col]
-                        if pd.isna(val):
-                            continue
-                        makes = int(row[f"{label} Makes"])
-                        attempts = int(row[f"{label} Attempts"])
-                        jersey = row["Jersey"]
-                        name = row["Player"]
-                        rc.add_paragraph(
-                            f"{rank}. #{jersey} {name} – {val:.1f}% ({makes}/{attempts})"
-                        )
-
-            fg_buf = BytesIO()
-            fg_doc.save(fg_buf)
-            fg_buf.seek(0)
+            buf2 = BytesIO()
+            fg_doc.save(buf2)
+            buf2.seek(0)
 
             st.download_button(
                 "Download FG% DOCX",
-                data=fg_buf,
+                data=buf2,
                 file_name=f"{safe_team_name}_fg_percentages.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             )
 
 else:
-    st.info(
-        "⬆️ Upload the CBB Analytics team player-profiles PDF to extract zone FGA% and generate a Shot Diet DOCX."
-    )
-
+    st.info("⬆️ Upload the CBB Analytics team player-profiles PDF to extract zone FGA% and generate DOCX files.")
 
 
 # ---------- ADVANCED STATS PIPELINE ----------
