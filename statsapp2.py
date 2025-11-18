@@ -165,50 +165,38 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
     """
     Parse raw text copied directly from a KenPom player-usage/advanced page.
 
-    Strategy:
-      * Treat each PLAYER as a "block" of lines between jersey/name lines.
-      * Inside each block:
-          - Identify jersey + name.
-          - Find height token (like '6-9'), then weight, year (Fr/So/Jr/Sr/Gr).
-          - Starting after the year, locate %Min and ORtg using BOTH patterns:
-                A: G S %Min ORtg ...
-                B: G S %Min %MinRank ORtg ...
-          - Everything after ORtg up to the first shooting-split token (like '27-34')
-            is "advanced zone".
-          - In the advanced zone we exploit the KenPom rule:
-                real stats have a decimal point; ranks are plain ints.
-            So we take the first 13 tokens that contain a "." as:
-                %Poss, %Shots, eFG%, TS%, OR%, DR%, ARate,
-                TORate, Blk%, Stl%, FC/40, FD/40, FTRate.
+    Works for:
+      - multi-line players with ranks between %Min and ORtg
+      - one-line players (no 'National Rank' line)
+      - low ORtg guys (e.g., 28.8)
     """
 
-    # Clean + strip empty lines
+    import re
+
+    # ---- Clean lines ----
     lines = [ln.rstrip() for ln in raw.splitlines()]
     lines = [ln for ln in lines if ln.strip()]
 
-    # Find indices of lines that start a player: "12 Cameron Boozer", "8 Darren Harris ..."
+    # Player blocks start on lines like: "20 Michael McNair"
     player_starts = []
     for idx, line in enumerate(lines):
         if re.match(r"^\s*\d+\s+[A-Za-z]", line):
             player_starts.append(idx)
 
     if not player_starts:
-        raise ValueError("No player lines found in pasted text (no lines starting with jersey + name).")
+        raise ValueError("No player lines found in pasted text.")
 
     players = []
 
     def parse_player_block(block_lines):
         text = " ".join(block_lines)
         tokens = text.split()
-        if not tokens:
+        if not tokens or not tokens[0].isdigit():
             return None
 
-        # 1) Jersey
-        if not tokens[0].isdigit():
-            return None
         jersey = tokens[0]
 
-        # 2) Name: from tokens[1] until we hit HEIGHT (e.g., '6-9') or YEAR (Fr/So/etc)
+        # --- Name up to height/year ---
         name_tokens = []
         height_idx = None
         year_tokens = {"Fr", "So", "Jr", "Sr", "Gr", "Fr.", "So.", "Jr.", "Sr."}
@@ -216,7 +204,8 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
         for i in range(1, len(tokens)):
             t = tokens[i]
             if re.match(r"^\d+-\d+$", t) or t in year_tokens:
-                height_idx = i if re.match(r"^\d+-\d+$", t) else None
+                if re.match(r"^\d+-\d+$", t):
+                    height_idx = i
                 break
             else:
                 name_tokens.append(t)
@@ -224,13 +213,13 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
         if not name_tokens:
             return None
 
-        # build + clean name (KenPom paste specific)
+        # Clean name for pasted KenPom
         name = " ".join(name_tokens)
-        name = re.sub(r"(?i)\s*national\s*rank.*$", "", name)  # drop any 'National Rank'
-        name = re.sub(r"\s*\d+$", "", name)                     # drop trailing digits like '1'
+        name = re.sub(r"(?i)\s*national\s*rank.*$", "", name)  # drop 'National Rank'
+        name = re.sub(r"\s*\d+$", "", name)                    # drop trailing digits like '1'
         name = " ".join(name.split())
 
-        # If we didn't find an explicit height token yet, scan again for it
+        # If we didn't see height yet, scan for it
         if height_idx is None:
             for i in range(len(name_tokens) + 1, len(tokens)):
                 t = tokens[i]
@@ -239,86 +228,53 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
                     break
 
         if height_idx is None or height_idx + 2 >= len(tokens):
-            # Can't reliably locate height/weight/year; still keep jersey + name
+            # Still return jersey + player so at least something shows
             return {"Jersey": jersey, "Player": name}
 
-        # 3) Year index (Ht, Wt, Yr)
+        # Ht, Wt, Yr
         yr_idx = height_idx + 2
 
-        # 4) Find %Min and ORtg after YEAR using patterns A and B
+        # --- Detect %Min and ORtg robustly ---
         percent_min = None
         ortg = None
         ortg_token_index = None
 
-        # Helper: is this token an int?
-        def is_int_token(tok):
-            return tok.isdigit()
-
-        # We scan tokens after Yr for a candidate %Min
-        for i in range(yr_idx + 1, len(tokens) - 1):
-            t_i = tokens[i]
-            # candidate %Min must be decimal between 0 and 100
-            if "." not in t_i:
+        # Scan for first decimal 0–100 after Yr (= %Min)
+        # Then scan forward for the next decimal 20–200 (= ORtg),
+        # allowing integer ranks in between.
+        for i in range(yr_idx + 1, len(tokens)):
+            t = tokens[i]
+            if "." not in t:
                 continue
             try:
-                v_min = float(t_i)
+                v = float(t)
             except ValueError:
                 continue
-            if not (0.0 <= v_min <= 100.0):
-                continue
+            if not (0.0 <= v <= 100.0):
+                continue  # not %Min
 
-            # require at least one or two small ints before it (G, S)
-            prev_ok = False
-            # one previous int
-            if i - 1 >= yr_idx + 1 and is_int_token(tokens[i - 1]) and int(tokens[i - 1]) <= 40:
-                prev_ok = True
-            # or two previous ints
-            if (
-                i - 2 >= yr_idx + 1
-                and is_int_token(tokens[i - 1])
-                and is_int_token(tokens[i - 2])
-                and int(tokens[i - 1]) <= 40
-                and int(tokens[i - 2]) <= 40
-            ):
-                prev_ok = True
-
-            if not prev_ok:
-                continue
-
-            # ---- Pattern A: next token is ORtg (decimal 50–200) ----
-            if i + 1 < len(tokens) and "." in tokens[i + 1]:
+            # Candidate %Min found -> look ahead for ORtg
+            for j in range(i + 1, min(i + 8, len(tokens))):
+                tj = tokens[j]
+                if "." not in tj:
+                    continue
                 try:
-                    v_ortg = float(tokens[i + 1])
-                    if 50.0 <= v_ortg <= 200.0:
-                        percent_min = v_min
-                        ortg = v_ortg
-                        ortg_token_index = i + 1
-                        break
+                    v2 = float(tj)
                 except ValueError:
-                    pass
+                    continue
+                if 20.0 <= v2 <= 200.0:  # ORtg range (handles 28.8 up to 180+)
+                    percent_min = v
+                    ortg = v2
+                    ortg_token_index = j
+                    break
+            if ortg_token_index is not None:
+                break
 
-            # ---- Pattern B: next is rank (int), then ORtg (decimal 50–200) ----
-            if (
-                i + 2 < len(tokens)
-                and is_int_token(tokens[i + 1])
-                and "." in tokens[i + 2]
-            ):
-                try:
-                    v_ortg = float(tokens[i + 2])
-                    if 50.0 <= v_ortg <= 200.0:
-                        percent_min = v_min
-                        ortg = v_ortg
-                        ortg_token_index = i + 2
-                        break
-                except ValueError:
-                    pass
-
-        if ortg is None or ortg_token_index is None:
-            # couldn't find ORtg cleanly
+        if ortg_token_index is None:
+            # Couldn't confidently find ORtg; skip this player
             return None
 
-        # 5) Advanced zone: from token after ORtg until first shooting-split token
-        #    (like '8-9', '11-13', etc.) or until 'FTM-A'/'2PM-A'/'3PM-A'.
+        # --- Advanced zone: everything after ORtg up to splits (8-9, 11-13, etc.) ---
         adv_start = ortg_token_index + 1
         adv_end = len(tokens)
         for j in range(adv_start, len(tokens)):
@@ -329,20 +285,17 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
 
         adv_tokens = tokens[adv_start:adv_end]
 
-        # KenPom rule: real stats have decimal point; ranks are ints.
+        # KenPom rule: real stats have a decimal; ranks are plain ints.
         stat_tokens = [t for t in adv_tokens if "." in t]
 
-        if not stat_tokens:
-            return {"Jersey": jersey, "Player": name, "ORtg": ortg}
-
-        # First 13 decimal tokens are our advanced stats, in order:
-        # %Poss, %Shots, eFG%, TS%, OR%, DR%, ARate, TORate,
-        # Blk%, Stl%, FC/40, FD/40, FTRate
+        # First 13 decimals → advanced stats in order:
+        # %Poss, %Shots, eFG%, TS%, OR%, DR%, ARate,
+        # TORate, Blk%, Stl%, FC/40, FD/40, FTRate
         stat_tokens = stat_tokens[:13]
         stat_values = []
         for t in stat_tokens:
             try:
-                stat_values.append(float(t.replace("%", "")))
+                stat_values.append(float(t))
             except ValueError:
                 stat_values.append(None)
 
@@ -372,11 +325,10 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
 
         return row
 
-    # Build blocks and parse each
+    # Build blocks and parse
     for idx, start_idx in enumerate(player_starts):
         end_idx = player_starts[idx + 1] if idx + 1 < len(player_starts) else len(lines)
-        block_lines = lines[start_idx:end_idx]
-        row = parse_player_block(block_lines)
+        row = parse_player_block(lines[start_idx:end_idx])
         if row is not None:
             players.append(row)
 
@@ -384,6 +336,7 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
         raise ValueError("Could not parse any players from the pasted KenPom text.")
 
     df = pd.DataFrame(players)
+    # If you already have a helper that cleans jerseys/rounding, keep using it:
     df = _final_clean_kenpom_df(df)
     return df
 
