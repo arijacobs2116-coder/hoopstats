@@ -715,6 +715,14 @@ team_pdf = st.file_uploader(
     key="cbb_team_pdf",
 )
 
+st.subheader("CBB Analytics – Shooting by Region (Team PDF)")
+
+team_pdf = st.file_uploader(
+    "Upload CBB Analytics *Team Player-profiles* PDF (with 'Shooting by Region (Full Season)' tables)",
+    type=["pdf"],
+    key="cbb_team_pdf",
+)
+
 if team_pdf is not None:
     if not title_text:
         st.error("❗ Please enter a team name before generating the Shot Diet and FG% DOCX files.")
@@ -773,7 +781,7 @@ if team_pdf is not None:
             # ================================================================
             #          SIMPLE FG% PARSE FROM SHOT ZONE TABLE (PDF)
             # ================================================================
-            def parse_cbb_team_pdf_fg_zones(uploaded_pdf):
+            def parse_cbb_team_pdf_fg_zones(uploaded_pdf: BytesIO) -> pd.DataFrame:
                 """
                 Reads the same CBB Analytics team PDF and extracts
                 FG% by region for each player from the
@@ -809,7 +817,7 @@ if team_pdf is not None:
 
                     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
 
-                    # Player header: "Name (#12, Guard, 6'4") : Profile"
+                    # Player header: "Name (#12, Guard, 6'4\") : Profile"
                     header_line = lines[0]
                     m = re.match(r"^(.*?)\s*\(#(\d+)", header_line)
                     if m:
@@ -829,14 +837,10 @@ if team_pdf is not None:
                         continue
 
                     fg_vals = []
-                    for ln in lines[shot_idx + 1:]:
+
+                    for ln in lines[shot_idx + 1 :]:
                         # stop when we hit DNQ / next section
-                        if (
-                            ln.startswith("DNQ")
-                            or "Zone % of Shots" in ln
-                            or "Zone FG%" in ln
-                            or "Zone Metrics" in ln
-                        ):
+                        if ln.startswith("DNQ") or "Zone % of Shots" in ln or "Zone FG%" in ln:
                             break
 
                         parts = ln.split()
@@ -844,7 +848,7 @@ if team_pdf is not None:
                         if not percent_tokens:
                             continue
 
-                        # Expect: ... FGA% FG%   → pick the FG% value
+                        # Expect: ... FGA% FG%
                         if len(percent_tokens) >= 2:
                             fg_token = percent_tokens[1]
                         else:
@@ -861,7 +865,6 @@ if team_pdf is not None:
                         if len(fg_vals) >= len(zones):
                             break
 
-                    # pad to length of zones
                     while len(fg_vals) < len(zones):
                         fg_vals.append(float("nan"))
 
@@ -881,22 +884,151 @@ if team_pdf is not None:
                     "FG% Above Break 3s",
                     "FG% Corner 3s",
                 ]
-
                 df = df[keep_cols].copy()
 
-                # make all FG% numeric and fill NaN with 0.0
+                # Make FG% numeric and fill NaN with 0.0
                 fg_cols = [c for c in keep_cols if c not in ("Jersey", "Player")]
                 for c in fg_cols:
                     df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
 
                 return df
 
-            # parse FG% zones for later preview / DOCX
-            df_fg = parse_cbb_team_pdf_fg_zones(team_pdf)
+            # parse FG% zones from PDF → df_fg_zones
+            df_fg_zones = parse_cbb_team_pdf_fg_zones(team_pdf)
 
+            # ================================================================
+            #          NOW REQUIRE OVERVIEW CSV (WITH FGA) FOR MAKES/ATTEMPTS
+            # ================================================================
+            if overview_file is None:
+                st.error(
+                    "❗ Upload a CBB Overview CSV (with an 'fga' column) to generate the FG% DOCX with makes/attempts."
+                )
+            else:
+                # Load overview with FGA
+                overview_file.seek(0)
+                try:
+                    df_overview_all = load_and_clean_overview_csv(overview_file)
+                except Exception as e:
+                    st.error(f"Error reading overview CSV for FGA: {e}")
+                    df_overview_all = None
+
+                if df_overview_all is None or "fga" not in df_overview_all.columns:
+                    st.error(
+                        "❗ The Overview CSV must include an 'fga' column (total FGA per player)."
+                    )
+                else:
+                    df_fga = df_overview_all[["Jersey", "Player", "fga"]].copy()
+
+                    # Merge: FG% by zone + FGA% by zone + FGA total
+                    df_fg = df_fg_zones.merge(
+                        df_shooting, on=["Jersey", "Player"], how="left"
+                    )
+                    df_fg = df_fg.merge(df_fga, on=["Jersey", "Player"], how="left")
+
+                    # ============================================================
+                    #                         FG% PREVIEW
+                    # ============================================================
+                    st.markdown("### **FG% Table Preview (From Shooting by Region FG%)**")
+
+                    fg_preview_cols = [
+                        "Jersey",
+                        "Player",
+                        "FG% At Rim",
+                        "FG% In Paint",
+                        "FG% Midrange 2s",
+                        "FG% Above Break 3s",
+                        "FG% Corner 3s",
+                    ]
+
+                    st.dataframe(df_fg[fg_preview_cols], use_container_width=True)
+
+                    # ============================================================
+                    #          COMPUTE ZONE MAKES / ATTEMPTS USING FGA
+                    # ============================================================
+                    zone_defs = [
+                        ("At Rim",         "FGA% At Rim",         "FG% At Rim"),
+                        ("In Paint",       "FGA% In Paint",       "FG% In Paint"),
+                        ("Midrange 2s",    "FGA% Midrange 2s",    "FG% Midrange 2s"),
+                        ("Above Break 3s", "FGA% Above Break 3s", "FG% Above Break 3s"),
+                        ("Corner 3s",      "FGA% Corner 3s",      "FG% Corner 3s"),
+                    ]
+
+                    # Initialize columns
+                    for zone_name, _, _ in zone_defs:
+                        df_fg[f"{zone_name} Attempts"] = 0
+                        df_fg[f"{zone_name} Makes"] = 0
+                        df_fg[f"{zone_name} FG"] = 0.0
+
+                    for idx, row in df_fg.iterrows():
+                        total_fga = row.get("fga", 0)
+                        if pd.isna(total_fga) or total_fga <= 0:
+                            # Leave as 0 attempts / 0 makes / 0% FG
+                            continue
+
+                        for zone_name, fga_pct_col, fg_pct_col in zone_defs:
+                            fga_pct = row.get(fga_pct_col)
+                            fg_pct = row.get(fg_pct_col)
+
+                            if pd.isna(fga_pct) or pd.isna(fg_pct):
+                                # keep 0/0 0%
+                                continue
+
+                            zone_attempts = round(total_fga * (fga_pct / 100.0))
+                            zone_makes = round(zone_attempts * (fg_pct / 100.0))
+
+                            df_fg.at[idx, f"{zone_name} Attempts"] = int(zone_attempts)
+                            df_fg.at[idx, f"{zone_name} Makes"] = int(zone_makes)
+                            df_fg.at[idx, f"{zone_name} FG"] = (
+                                0.0
+                                if zone_attempts == 0
+                                else 100.0 * zone_makes / zone_attempts
+                            )
+
+                    # ============================================================
+                    #      TOTAL 2PT & 3PT MAKES / ATTEMPTS / FG% PER PLAYER
+                    # ============================================================
+                    # 2pt zones: At Rim, In Paint, Midrange 2s
+                    df_fg["Total 2pt Attempts"] = (
+                        df_fg["At Rim Attempts"]
+                        + df_fg["In Paint Attempts"]
+                        + df_fg["Midrange 2s Attempts"]
+                    )
+                    df_fg["Total 2pt Makes"] = (
+                        df_fg["At Rim Makes"]
+                        + df_fg["In Paint Makes"]
+                        + df_fg["Midrange 2s Makes"]
+                    )
+                    df_fg["Total 2pt FG"] = 0.0
+                    mask_2 = df_fg["Total 2pt Attempts"] > 0
+                    df_fg.loc[mask_2, "Total 2pt FG"] = (
+                        100.0
+                        * df_fg.loc[mask_2, "Total 2pt Makes"]
+                        / df_fg.loc[mask_2, "Total 2pt Attempts"]
+                    )
+
+                    # 3pt zones: Above Break 3s, Corner 3s
+                    df_fg["Total 3pt Attempts"] = (
+                        df_fg["Above Break 3s Attempts"]
+                        + df_fg["Corner 3s Attempts"]
+                    )
+                    df_fg["Total 3pt Makes"] = (
+                        df_fg["Above Break 3s Makes"]
+                        + df_fg["Corner 3s Makes"]
+                    )
+                    df_fg["Total 3pt FG"] = 0.0
+                    mask_3 = df_fg["Total 3pt Attempts"] > 0
+                    df_fg.loc[mask_3, "Total 3pt FG"] = (
+                        100.0
+                        * df_fg.loc[mask_3, "Total 3pt Makes"]
+                        / df_fg.loc[mask_3, "Total 3pt Attempts"]
+                    )
+
+                    # (DOCX-building code for Shot Diet + FG% goes here,
+                    # using df_shooting and df_fg exactly as in the previous
+                    # snippet we wrote.)
 else:
     st.info(
-        "⬆️ Upload the CBB Analytics team player-profiles PDF to extract zone FGA% and generate a Shot Diet + FG% DOCX."
+        "⬆️ Upload the CBB Analytics team player-profiles PDF to extract zone FGA% and generate Shot Diet + FG% DOCX."
     )
 
 
