@@ -165,11 +165,6 @@ def extract_numbers(line: str):
 def parse_kenpom_paste(raw: str) -> pd.DataFrame:
     """
     Parse raw text copied directly from a KenPom player-usage/advanced page.
-
-    Works for:
-      - multi-line players with ranks between %Min and ORtg
-      - one-line players (no 'National Rank' line)
-      - low ORtg guys (e.g., 28.8)
     """
 
     import re
@@ -236,7 +231,6 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
         yr_idx = height_idx + 2
 
         # --- Detect %Min and ORtg robustly ---
-        percent_min = None
         ortg = None
         ortg_token_index = None
 
@@ -264,7 +258,6 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
                 except ValueError:
                     continue
                 if 20.0 <= v2 <= 200.0:  # ORtg range (handles 28.8 up to 180+)
-                    percent_min = v
                     ortg = v2
                     ortg_token_index = j
                     break
@@ -337,17 +330,15 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
         raise ValueError("Could not parse any players from the pasted KenPom text.")
 
     df = pd.DataFrame(players)
-    # If you already have a helper that cleans jerseys/rounding, keep using it:
     df = _final_clean_kenpom_df(df)
     return df
-
-
 
 
 def load_and_clean_overview_csv(uploaded_file):
     """
     Loads a CBB Analytics-style overview CSV and returns:
       Jersey, Player, and the overview stats used in the layout.
+    Includes 'fga' (total FGA) for FG% makes/attempts logic.
     """
     df = pd.read_csv(uploaded_file)
 
@@ -383,6 +374,7 @@ def load_and_clean_overview_csv(uploaded_file):
         "stlPct",
         "pfP40",
         "pfEff",
+        "fga",  # total FGA for season
     ]
 
     cols_present = [c for c in needed_cols if c in df.columns]
@@ -425,16 +417,6 @@ def remove_table_borders(table):
 def format_overview_value(col: str, value: float) -> str:
     """
     Convert overview stats into correct display formats.
-
-    Percent logic:
-        - If value < 2     → treat as decimal percentage (1.111 → 111.1%)
-        - If value ≥ 2     → already percent (48.7 → 48.7%, 140 → 140.0%)
-
-    Ratios:
-        - astTov, astUsage, pfEff → two decimals + 'x'
-
-    Per-40:
-        - fgaP40, pfP40 → one decimal
     """
     if pd.isna(value):
         return ""
@@ -500,17 +482,17 @@ def get_darkest_color_from_logo(logo_bytes):
 
     return RGBColor(darkest_rgb[0], darkest_rgb[1], darkest_rgb[2])
 
+
 def parse_cbb_team_pdf_shooting_zones(uploaded_pdf) -> pd.DataFrame:
     """
     Given a CBB Analytics TEAM player-profiles PDF, extract FGA% by shot zone
     from each player's 'Shot Zone GP* FGA/G FGA% FG%' table on their page.
 
-    Returns a DataFrame with one row per player and columns:
+    Returns a DataFrame with:
       Jersey, Player,
       FGA% At Rim, FGA% In Paint, FGA% Midrange 2s,
       FGA% Above Break 3s, FGA% Corner 3s
     """
-    import re
     from io import BytesIO
     from PyPDF2 import PdfReader
 
@@ -624,8 +606,6 @@ def parse_cbb_team_pdf_shooting_zones(uploaded_pdf) -> pd.DataFrame:
     return df[keep_cols]
 
 
-
-
 # ---------------- Streamlit UI ----------------
 
 team_name = st.text_input(
@@ -643,7 +623,6 @@ logo_file = st.file_uploader(
     key="logo",
     help="Logo will appear at the top of both DOCX files, and its darkest non-black color will be used for titles and headers.",
 )
-
 
 if logo_file is None:
     st.error("❗ Team logo is required.")
@@ -704,9 +683,9 @@ st.markdown("---")  # Divider between sections
 st.markdown("### Overview Stats Input (CBB)")
 
 overview_file = st.file_uploader(
-    "Upload a CBB Overview CSV (tsPct, fg2Pct, fg3Pct, usagePct, pfP40, pfEff, etc.)",
+    "Upload a CBB Overview CSV (tsPct, fg2Pct, fg3Pct, usagePct, pfP40, pfEff, etc., with an 'fga' column)",
     type=["csv"],
-    help="This will be used to generate the Overview DOCX.",
+    help="This will be used to generate the Overview DOCX and to compute FG% makes/attempts.",
 )
 
 # ---------------- BLUE NOTE FOR OVERVIEW STATS ----------------
@@ -792,7 +771,7 @@ if team_pdf is not None:
             st.dataframe(df_shooting[preview_cols], use_container_width=True)
 
             # ================================================================
-            #                  SIMPLE FG% PARSE FROM SHOT ZONE TABLE
+            #          SIMPLE FG% PARSE FROM SHOT ZONE TABLE (PDF)
             # ================================================================
             def parse_cbb_team_pdf_fg_zones(uploaded_pdf):
                 """
@@ -853,7 +832,7 @@ if team_pdf is not None:
 
                     for ln in lines[shot_idx + 1 :]:
                         # stop when we hit DNQ / next section
-                        if ln.startswith("DNQ") or "Zone Metrics" in ln or "Zone FG%" in ln:
+                        if ln.startswith("DNQ") or "Zone % of Shots" in ln or "Zone FG%" in ln:
                             break
 
                         parts = ln.split()
@@ -886,7 +865,7 @@ if team_pdf is not None:
                         row[f"FG% {z}"] = fg_vals[i]
                     rows.append(row)
 
-                df = pd.DataFrame(rows)
+                df_local = pd.DataFrame(rows)
 
                 keep_cols = [
                     "Jersey",
@@ -897,191 +876,255 @@ if team_pdf is not None:
                     "FG% Above Break 3s",
                     "FG% Corner 3s",
                 ]
-                return df[keep_cols]
+                return df_local[keep_cols]
 
-            # ---- actually parse FG% zones ----
-            df_fg = parse_cbb_team_pdf_fg_zones(team_pdf)
-
-            # ================================================================
-            #                         FG% PREVIEW
-            # ================================================================
-            st.markdown("### **FG% Table Preview (From Shooting by Region FG%)**")
-
-            fg_preview_cols = [
-                "Jersey",
-                "Player",
-                "FG% At Rim",
-                "FG% In Paint",
-                "FG% Midrange 2s",
-                "FG% Above Break 3s",
-                "FG% Corner 3s",
-            ]
-
-            st.dataframe(df_fg[fg_preview_cols], use_container_width=True)
+            df_fg_zones = parse_cbb_team_pdf_fg_zones(team_pdf)
 
             # ================================================================
-            #                       BUILD SHOT DIET DOCX
+            #                  MERGE WITH FGA FROM OVERVIEW CSV
             # ================================================================
-            shooting_doc = Document()
-            style = shooting_doc.styles["Normal"]
-            font = style.font
-            font.name = "Calibri"
-            font.size = Pt(11)
+            if overview_file is None:
+                st.error("❗ Upload a CBB Overview CSV (with an 'fga' column) to generate the FG% DOCX with makes/attempts.")
+            else:
+                # Load overview with FGA
+                overview_file.seek(0)
+                try:
+                    df_overview_all = load_and_clean_overview_csv(overview_file)
+                except Exception as e:
+                    st.error(f"Error reading overview CSV for FGA: {e}")
+                    df_overview_all = None
 
-            if logo_bytes:
-                logo_stream = BytesIO(logo_bytes)
-                shooting_doc.add_picture(logo_stream, width=Inches(1.2))
-                shooting_doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                if df_overview_all is None or "fga" not in df_overview_all.columns:
+                    st.error("❗ The Overview CSV must include an 'fga' column (total FGA per player).")
+                else:
+                    df_fga = df_overview_all[["Jersey", "Player", "fga"]].copy()
 
-            title_paragraph = shooting_doc.add_paragraph()
-            run = title_paragraph.add_run(f"{title_text} SHOT DIET")
-            run.bold = True
-            run.font.size = Pt(14)
-            if header_color is not None:
-                run.font.color.rgb = header_color
-            title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            title_paragraph.paragraph_format.space_after = Pt(4)
+                    # Merge: FG% by zone + FGA% by zone + FGA total
+                    df_fg = df_fg_zones.merge(df_shooting, on=["Jersey", "Player"], how="left")
+                    df_fg = df_fg.merge(df_fga, on=["Jersey", "Player"], how="left")
 
-            left_zone_categories = [
-                ("FGA% At Rim", "FGA% -- At the Rim"),
-                ("FGA% In Paint", "FGA% -- In the Paint"),
-                ("FGA% Midrange 2s", "FGA% -- Mid-Range 2s"),
-                ("FGA% All 2 PT Attempts", "FGA% -- All 2 PT Attempts"),
-            ]
-            right_zone_categories = [
-                ("FGA% Above Break 3s", "FGA% -- Above the Break 3s"),
-                ("FGA% Corner 3s", "FGA% -- Corner 3s"),
-                ("FGA% All 3 PT Attempts", "FGA% -- All 3 PT Attempts"),
-            ]
+                    # ============================================================
+                    #                         FG% PREVIEW
+                    # ============================================================
+                    st.markdown("### **FG% Table Preview (From Shooting by Region FG%)**")
 
-            max_rows = max(len(left_zone_categories), len(right_zone_categories))
+                    fg_preview_cols = [
+                        "Jersey",
+                        "Player",
+                        "FG% At Rim",
+                        "FG% In Paint",
+                        "FG% Midrange 2s",
+                        "FG% Above Break 3s",
+                        "FG% Corner 3s",
+                    ]
 
-            for i in range(max_rows):
-                left_cat = left_zone_categories[i] if i < len(left_zone_categories) else None
-                right_cat = right_zone_categories[i] if i < len(right_zone_categories) else None
+                    st.dataframe(df_fg[fg_preview_cols], use_container_width=True)
 
-                table = shooting_doc.add_table(rows=1, cols=2)
-                table.autofit = True
-                remove_table_borders(table)
+                    # ============================================================
+                    #          COMPUTE ZONE MAKES / ATTEMPTS USING FGA
+                    # ============================================================
+                    zone_defs = [
+                        ("At Rim",         "FGA% At Rim",        "FG% At Rim"),
+                        ("In Paint",       "FGA% In Paint",      "FG% In Paint"),
+                        ("Midrange 2s",    "FGA% Midrange 2s",   "FG% Midrange 2s"),
+                        ("Above Break 3s", "FGA% Above Break 3s","FG% Above Break 3s"),
+                        ("Corner 3s",      "FGA% Corner 3s",     "FG% Corner 3s"),
+                    ]
 
-                left_cell = table.rows[0].cells[0]
-                right_cell = table.rows[0].cells[1]
+                    # Initialize columns
+                    for zone_name, _, _ in zone_defs:
+                        df_fg[f"{zone_name} Attempts"] = 0
+                        df_fg[f"{zone_name} Makes"] = 0
+                        df_fg[f"{zone_name} FG"] = None
 
-                # LEFT side
-                if left_cat is not None:
-                    col, ttl = left_cat
-                    p = left_cell.add_paragraph()
-                    r = p.add_run(ttl)
-                    r.bold = True
-                    r.font.size = Pt(16)
-                    if header_color is not None:
-                        r.font.color.rgb = header_color
-
-                    if col in df_shooting.columns:
-                        df_sorted = df_shooting.sort_values(by=col, ascending=False)
-                        for rank, (_, row) in enumerate(df_sorted.iterrows(), start=1):
-                            val_str = f"{row[col]:.1f}%"
-                            jersey = str(row["Jersey"]).strip()
-                            name = str(row["Player"])
-                            left_cell.add_paragraph(f"{rank}. #{jersey} {name} – {val_str}")
-
-                # RIGHT side
-                if right_cat is not None:
-                    col, ttl = right_cat
-                    p = right_cell.add_paragraph()
-                    r = p.add_run(ttl)
-                    r.bold = True
-                    r.font.size = Pt(16)
-                    if header_color is not None:
-                        r.font.color.rgb = header_color
-
-                    if col in df_shooting.columns:
-                        df_sorted = df_shooting.sort_values(by=col, ascending=False)
-                        for rank, (_, row) in enumerate(df_sorted.iterrows(), start=1):
-                            val_str = f"{row[col]:.1f}%"
-                            jersey = str(row["Jersey"]).strip()
-                            name = str(row["Player"])
-                            right_cell.add_paragraph(f"{rank}. #{jersey} {name} – {val_str}")
-
-            shooting_buffer = BytesIO()
-            shooting_doc.save(shooting_buffer)
-            shooting_buffer.seek(0)
-
-            st.download_button(
-                "Download Shot Diet DOCX",
-                data=shooting_buffer,
-                file_name=f"{safe_team_name}_shot_diet.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            )
-
-            # ================================================================
-            #                        BUILD FG% DOCX
-            # ================================================================
-            fg_doc = Document()
-            fg_style = fg_doc.styles["Normal"]
-            fg_style.font.name = "Calibri"
-            fg_style.font.size = Pt(11)
-
-            if logo_bytes:
-                fg_doc.add_picture(BytesIO(logo_bytes), width=Inches(1.2))
-                fg_doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-            title_p2 = fg_doc.add_paragraph()
-            r = title_p2.add_run(f"{title_text} FG%")
-            r.bold = True
-            r.font.size = Pt(14)
-            if header_color is not None:
-                r.font.color.rgb = header_color
-            title_p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            title_p2.paragraph_format.space_after = Pt(4)
-
-            fg_categories = [
-                ("FG% – At the Rim", "FG% At Rim"),
-                ("FG% – Paint 2s", "FG% In Paint"),
-                ("FG% – Midrange 2s", "FG% Midrange 2s"),
-                ("FG% – Above-the Break 3s", "FG% Above Break 3s"),
-                ("FG% – Corner 3s", "FG% Corner 3s"),
-            ]
-
-            for title, colname in fg_categories:
-                table = fg_doc.add_table(rows=1, cols=2)
-                remove_table_borders(table)
-                left_cell = table.rows[0].cells[0]
-                right_cell = table.rows[0].cells[1]
-
-                # Header
-                p = left_cell.add_paragraph()
-                r = p.add_run(title)
-                r.bold = True
-                r.font.size = Pt(16)
-                if header_color is not None:
-                    r.font.color.rgb = header_color
-
-                if colname in df_fg.columns:
-                    df_sorted = df_fg.sort_values(by=colname, ascending=False)
-                    for rank, (_, row) in enumerate(df_sorted.iterrows(), start=1):
-                        val = row[colname]
-                        if pd.isna(val):
+                    for idx, row in df_fg.iterrows():
+                        total_fga = row.get("fga", 0)
+                        if pd.isna(total_fga) or total_fga <= 0:
                             continue
-                        jersey = str(row["Jersey"]).strip()
-                        name = str(row["Player"])
-                        line = f"{rank}. #{jersey} {name} – {val:.1f}%"
-                        left_cell.add_paragraph(line)
 
-            fg_buffer = BytesIO()
-            fg_doc.save(fg_buffer)
-            fg_buffer.seek(0)
+                        for zone_name, fga_pct_col, fg_pct_col in zone_defs:
+                            fga_pct = row.get(fga_pct_col)
+                            fg_pct = row.get(fg_pct_col)
 
-            st.download_button(
-                "Download FG% DOCX",
-                data=fg_buffer,
-                file_name=f"{safe_team_name}_fg_percentages.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            )
+                            if pd.isna(fga_pct) or pd.isna(fg_pct):
+                                continue
+
+                            zone_attempts = round(total_fga * (fga_pct / 100.0))
+                            zone_makes = round(zone_attempts * (fg_pct / 100.0))
+
+                            df_fg.at[idx, f"{zone_name} Attempts"] = zone_attempts
+                            df_fg.at[idx, f"{zone_name} Makes"] = zone_makes
+                            df_fg.at[idx, f"{zone_name} FG"] = (
+                                None if zone_attempts == 0 else 100.0 * zone_makes / zone_attempts
+                            )
+
+                    # ============================================================
+                    #                       BUILD SHOT DIET DOCX
+                    # ============================================================
+                    shooting_doc = Document()
+                    style = shooting_doc.styles["Normal"]
+                    font = style.font
+                    font.name = "Calibri"
+                    font.size = Pt(11)
+
+                    if logo_bytes:
+                        logo_stream = BytesIO(logo_bytes)
+                        shooting_doc.add_picture(logo_stream, width=Inches(1.2))
+                        shooting_doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+                    title_paragraph = shooting_doc.add_paragraph()
+                    run = title_paragraph.add_run(f"{title_text} SHOT DIET")
+                    run.bold = True
+                    run.font.size = Pt(14)
+                    if header_color is not None:
+                        run.font.color.rgb = header_color
+                    title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    title_paragraph.paragraph_format.space_after = Pt(4)
+
+                    left_zone_categories = [
+                        ("FGA% At Rim", "FGA% -- At the Rim"),
+                        ("FGA% In Paint", "FGA% -- In the Paint"),
+                        ("FGA% Midrange 2s", "FGA% -- Mid-Range 2s"),
+                        ("FGA% All 2 PT Attempts", "FGA% -- All 2 PT Attempts"),
+                    ]
+                    right_zone_categories = [
+                        ("FGA% Above Break 3s", "FGA% -- Above the Break 3s"),
+                        ("FGA% Corner 3s", "FGA% -- Corner 3s"),
+                        ("FGA% All 3 PT Attempts", "FGA% -- All 3 PT Attempts"),
+                    ]
+
+                    max_rows = max(len(left_zone_categories), len(right_zone_categories))
+
+                    for i in range(max_rows):
+                        left_cat = left_zone_categories[i] if i < len(left_zone_categories) else None
+                        right_cat = right_zone_categories[i] if i < len(right_zone_categories) else None
+
+                        table = shooting_doc.add_table(rows=1, cols=2)
+                        table.autofit = True
+                        remove_table_borders(table)
+
+                        left_cell = table.rows[0].cells[0]
+                        right_cell = table.rows[0].cells[1]
+
+                        # LEFT side
+                        if left_cat is not None:
+                            col, ttl = left_cat
+                            p = left_cell.add_paragraph()
+                            r = p.add_run(ttl)
+                            r.bold = True
+                            r.font.size = Pt(16)
+                            if header_color is not None:
+                                r.font.color.rgb = header_color
+
+                            if col in df_shooting.columns:
+                                df_sorted = df_shooting.sort_values(by=col, ascending=False)
+                                for rank, (_, row_s) in enumerate(df_sorted.iterrows(), start=1):
+                                    val_str = f"{row_s[col]:.1f}%"
+                                    jersey = str(row_s["Jersey"]).strip()
+                                    name = str(row_s["Player"])
+                                    left_cell.add_paragraph(f"{rank}. #{jersey} {name} – {val_str}")
+
+                        # RIGHT side
+                        if right_cat is not None:
+                            col, ttl = right_cat
+                            p = right_cell.add_paragraph()
+                            r = p.add_run(ttl)
+                            r.bold = True
+                            r.font.size = Pt(16)
+                            if header_color is not None:
+                                r.font.color.rgb = header_color
+
+                            if col in df_shooting.columns:
+                                df_sorted = df_shooting.sort_values(by=col, ascending=False)
+                                for rank, (_, row_s) in enumerate(df_sorted.iterrows(), start=1):
+                                    val_str = f"{row_s[col]:.1f}%"
+                                    jersey = str(row_s["Jersey"]).strip()
+                                    name = str(row_s["Player"])
+                                    right_cell.add_paragraph(f"{rank}. #{jersey} {name} – {val_str}")
+
+                    shooting_buffer = BytesIO()
+                    shooting_doc.save(shooting_buffer)
+                    shooting_buffer.seek(0)
+
+                    st.download_button(
+                        "Download Shot Diet DOCX",
+                        data=shooting_buffer,
+                        file_name=f"{safe_team_name}_shot_diet.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    )
+
+                    # ============================================================
+                    #                        BUILD FG% DOCX
+                    # ============================================================
+                    fg_doc = Document()
+                    fg_style = fg_doc.styles["Normal"]
+                    fg_style.font.name = "Calibri"
+                    fg_style.font.size = Pt(11)
+
+                    if logo_bytes:
+                        fg_doc.add_picture(BytesIO(logo_bytes), width=Inches(1.2))
+                        fg_doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+                    title_p2 = fg_doc.add_paragraph()
+                    r = title_p2.add_run(f"{title_text} FG%")
+                    r.bold = True
+                    r.font.size = Pt(14)
+                    if header_color is not None:
+                        r.font.color.rgb = header_color
+                    title_p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    title_p2.paragraph_format.space_after = Pt(4)
+
+                    fg_sections = [
+                        ("FG% – At the Rim",        "At Rim FG",        "At Rim Makes",        "At Rim Attempts"),
+                        ("FG% – Paint 2s",          "In Paint FG",      "In Paint Makes",      "In Paint Attempts"),
+                        ("FG% – Midrange 2s",       "Midrange 2s FG",   "Midrange 2s Makes",   "Midrange 2s Attempts"),
+                        ("FG% – Above-the Break 3s","Above Break 3s FG","Above Break 3s Makes","Above Break 3s Attempts"),
+                        ("FG% – Corner 3s",         "Corner 3s FG",     "Corner 3s Makes",     "Corner 3s Attempts"),
+                    ]
+
+                    for title, fg_col, make_col, att_col in fg_sections:
+                        table = fg_doc.add_table(rows=1, cols=2)
+                        remove_table_borders(table)
+                        left_cell = table.rows[0].cells[0]
+                        right_cell = table.rows[0].cells[1]
+
+                        # Header
+                        p = left_cell.add_paragraph()
+                        r = p.add_run(title)
+                        r.bold = True
+                        r.font.size = Pt(16)
+                        if header_color is not None:
+                            r.font.color.rgb = header_color
+
+                        if fg_col in df_fg.columns:
+                            df_sorted = df_fg.sort_values(by=fg_col, ascending=False)
+                            for rank, (_, row_fg) in enumerate(df_sorted.iterrows(), start=1):
+                                val = row_fg[fg_col]
+                                if pd.isna(val):
+                                    continue
+                                makes = int(row_fg[make_col])
+                                attempts = int(row_fg[att_col])
+                                if attempts == 0:
+                                    continue
+                                jersey = str(row_fg["Jersey"]).strip()
+                                name = str(row_fg["Player"])
+                                line = f"{rank}. #{jersey} {name} – {val:.1f}% ({makes}/{attempts})"
+                                left_cell.add_paragraph(line)
+
+                    fg_buffer = BytesIO()
+                    fg_doc.save(fg_buffer)
+                    fg_buffer.seek(0)
+
+                    st.download_button(
+                        "Download FG% DOCX",
+                        data=fg_buffer,
+                        file_name=f"{safe_team_name}_fg_percentages.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    )
 
 else:
     st.info(
-        "⬆️ Upload the CBB Analytics team player-profiles PDF to extract zone FGA% and generate a Shot Diet + FG% DOCX."
+        "⬆️ Upload the CBB Analytics team player-profiles PDF to extract zone FGA% and generate Shot Diet + FG% DOCX."
     )
 
 
@@ -1277,6 +1320,7 @@ if overview_file is not None:
         st.error("❗ Please upload a team logo before generating the Overview DOCX.")
     else:
         try:
+            overview_file.seek(0)
             df_overview = load_and_clean_overview_csv(overview_file)
         except Exception as e:
             st.error(f"Error reading overview CSV: {e}")
