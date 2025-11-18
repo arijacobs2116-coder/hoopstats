@@ -510,6 +510,10 @@ def parse_cbb_team_pdf_shooting_zones(uploaded_pdf) -> pd.DataFrame:
       FGA% At Rim, FGA% In Paint, FGA% Midrange 2s,
       FGA% Above Break 3s, FGA% Corner 3s
     """
+    import re
+    from io import BytesIO
+    from PyPDF2 import PdfReader
+
     pdf_bytes = uploaded_pdf.read()
     reader = PdfReader(BytesIO(pdf_bytes))
 
@@ -529,6 +533,7 @@ def parse_cbb_team_pdf_shooting_zones(uploaded_pdf) -> pd.DataFrame:
             text = page.extract_text()
         except Exception:
             continue
+
         if not text or "Shot Zone" not in text or "FGA%" not in text:
             continue
 
@@ -544,22 +549,23 @@ def parse_cbb_team_pdf_shooting_zones(uploaded_pdf) -> pd.DataFrame:
             name = m.group(1).strip()
             jersey = m.group(2).strip()
         else:
-            # fallback: name before "(" if no jersey parsed cleanly
+            # fallback: name before "(" if no jersey matched
             name = header_line.split("(")[0].strip()
 
-        # Find the "Shot Zone ... FGA%" header
+        # Find the "Shot Zone ... FGA%" line
         shot_idx = None
         for i, ln in enumerate(lines):
             if "Shot Zone" in ln and "FGA%" in ln:
                 shot_idx = i
                 break
+
         if shot_idx is None:
             continue
 
-        # Rows following that header are the zone rows
+        # Now grab the rows that follow the Shot Zone header
         fga_vals = []
         for ln in lines[shot_idx + 1:]:
-            # Stop when we hit some other section
+            # Stop if we hit another section
             if ln.startswith("DNQ") or "Zone % of Shots" in ln or "Shot Chart" in ln:
                 break
 
@@ -567,7 +573,7 @@ def parse_cbb_team_pdf_shooting_zones(uploaded_pdf) -> pd.DataFrame:
             if len(parts) < 2:
                 continue
 
-            # Typical row: "<something> 33.3% 50.0%"
+            # e.g., "1.0 33.3% 50.0%"
             fga_token = parts[1]
             if "%" not in fga_token:
                 continue
@@ -584,7 +590,7 @@ def parse_cbb_team_pdf_shooting_zones(uploaded_pdf) -> pd.DataFrame:
         if not fga_vals:
             continue
 
-        # pad if short
+        # Ensure we have exactly 7 values (pad if short)
         while len(fga_vals) < len(zones):
             fga_vals.append(float("nan"))
 
@@ -592,6 +598,8 @@ def parse_cbb_team_pdf_shooting_zones(uploaded_pdf) -> pd.DataFrame:
             "Jersey": jersey,
             "Player": name,
         }
+
+        # Assign each zone's FGA%
         for i, z in enumerate(zones):
             row[f"FGA% {z}"] = fga_vals[i]
 
@@ -602,7 +610,7 @@ def parse_cbb_team_pdf_shooting_zones(uploaded_pdf) -> pd.DataFrame:
 
     df = pd.DataFrame(rows)
 
-    # Only keep the five zones you care about
+    # Only keep the 5 zones you care about
     keep_cols = [
         "Jersey",
         "Player",
@@ -612,6 +620,7 @@ def parse_cbb_team_pdf_shooting_zones(uploaded_pdf) -> pd.DataFrame:
         "FGA% Above Break 3s",
         "FGA% Corner 3s",
     ]
+
     return df[keep_cols]
 
 
@@ -729,9 +738,9 @@ team_pdf = st.file_uploader(
 
 if team_pdf is not None:
     if not title_text:
-        st.error("❗ Please enter a team name before generating the Shooting by Region DOCX.")
+        st.error("❗ Please enter a team name before generating the Shot Diet DOCX.")
     elif logo_bytes is None:
-        st.error("❗ Please upload a team logo before generating the Shooting by Region DOCX.")
+        st.error("❗ Please upload a team logo before generating the Shot Diet DOCX.")
     else:
         try:
             df_shooting = parse_cbb_team_pdf_shooting_zones(team_pdf)
@@ -741,7 +750,30 @@ if team_pdf is not None:
             st.markdown("**FGA% by Shot Zone (Full Season) – All Players**")
             st.dataframe(df_shooting, use_container_width=True)
 
-            # ---------- Build SHOOTING BY REGION DOCX ----------
+            # ---------- Add combined 2PT / 3PT categories ----------
+            base_cols = [
+                "FGA% At Rim",
+                "FGA% In Paint",
+                "FGA% Midrange 2s",
+                "FGA% Above Break 3s",
+                "FGA% Corner 3s",
+            ]
+            for c in base_cols:
+                if c in df_shooting.columns:
+                    df_shooting[c] = pd.to_numeric(df_shooting[c], errors="coerce")
+
+            df_shooting["FGA% All 2 PT Attempts"] = (
+                df_shooting["FGA% At Rim"]
+                + df_shooting["FGA% In Paint"]
+                + df_shooting["FGA% Midrange 2s"]
+            )
+
+            df_shooting["FGA% All 3 PT Attempts"] = (
+                df_shooting["FGA% Above Break 3s"]
+                + df_shooting["FGA% Corner 3s"]
+            )
+
+            # ---------- Build SHOT DIET DOCX ----------
             shooting_doc = Document()
 
             # Base font
@@ -757,9 +789,9 @@ if team_pdf is not None:
                 last_paragraph = shooting_doc.paragraphs[-1]
                 last_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-            # Title
+            # Title: TEAM NAME SHOT DIET
             title_paragraph = shooting_doc.add_paragraph()
-            run = title_paragraph.add_run(f"{title_text} SHOOTING BY REGION")
+            run = title_paragraph.add_run(f"{title_text} SHOT DIET")
             run.bold = True
             run.font.size = Pt(14)
             if header_color is not None:
@@ -767,24 +799,26 @@ if team_pdf is not None:
             title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
             title_paragraph.paragraph_format.space_after = Pt(4)
 
-            # Define zone categories (we'll sort players by these)
-            zone_categories = [
-                ("FGA% At Rim", "FGA% At Rim"),
-                ("FGA% In Paint", "FGA% In Paint"),
-                ("FGA% Midrange 2s", "FGA% Midrange 2s"),
-                ("FGA% Above Break 3s", "FGA% Above Break 3s"),
-                ("FGA% Corner 3s", "FGA% Corner 3s"),
+            # Define left/right categories
+            left_zone_categories = [
+                ("FGA% At Rim", "FGA% at the Rim"),
+                ("FGA% In Paint", "FGA% in the Paint"),
+                ("FGA% Midrange 2s", "FGA% Mid-Range 2s"),
+                ("FGA% All 2 PT Attempts", "FGA% All 2 PT Attempts"),
             ]
 
-            # Pair them into left/right columns
-            zone_pairs = []
-            for i in range(0, len(zone_categories), 2):
-                if i + 1 < len(zone_categories):
-                    zone_pairs.append((zone_categories[i], zone_categories[i + 1]))
-                else:
-                    zone_pairs.append((zone_categories[i], None))
+            right_zone_categories = [
+                ("FGA% Above Break 3s", "FGA% Above the Break 3s"),
+                ("FGA% Corner 3s", "FGA% Corner 3s"),
+                ("FGA% All 3 PT Attempts", "FGA% All 3 PT Attempts"),
+            ]
 
-            for left_cat, right_cat in zone_pairs:
+            max_rows = max(len(left_zone_categories), len(right_zone_categories))
+
+            for i in range(max_rows):
+                left_cat = left_zone_categories[i] if i < len(left_zone_categories) else None
+                right_cat = right_zone_categories[i] if i < len(right_zone_categories) else None
+
                 table = shooting_doc.add_table(rows=1, cols=2)
                 table.autofit = True
                 remove_table_borders(table)
@@ -792,7 +826,7 @@ if team_pdf is not None:
                 left_cell = table.rows[0].cells[0]
                 right_cell = table.rows[0].cells[1]
 
-                # LEFT ZONE
+                # ----- LEFT SIDE -----
                 if left_cat is not None:
                     col, title = left_cat
                     p = left_cell.add_paragraph()
@@ -829,7 +863,7 @@ if team_pdf is not None:
                             pl.paragraph_format.space_after = Pt(0)
                             pl.paragraph_format.line_spacing = Pt(11)
 
-                # RIGHT ZONE
+                # ----- RIGHT SIDE -----
                 if right_cat is not None:
                     col, title = right_cat
                     p = right_cell.add_paragraph()
@@ -871,23 +905,23 @@ if team_pdf is not None:
                 spacer.paragraph_format.space_after = Pt(0)
                 spacer.paragraph_format.line_spacing = Pt(0.25)
 
-            # Download button for Shooting DOCX
+            # Download button for Shot Diet DOCX
             shooting_buffer = BytesIO()
             shooting_doc.save(shooting_buffer)
             shooting_buffer.seek(0)
 
-            shooting_filename = f"{safe_team_name}_shooting_by_region.docx"
+            shooting_filename = f"{safe_team_name}_shot_diet.docx"
 
             st.download_button(
-                label="Download Shooting by Region DOCX",
+                label="Download Shot Diet DOCX",
                 data=shooting_buffer,
                 file_name=shooting_filename,
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                key="download_shooting_region",
+                key="download_shot_diet",
             )
 else:
     st.info(
-        "⬆️ Upload the CBB Analytics team player-profiles PDF to extract zone FGA% and generate a matching Shooting by Region DOCX."
+        "⬆️ Upload the CBB Analytics team player-profiles PDF to extract zone FGA% and generate a Shot Diet DOCX."
     )
 
 
