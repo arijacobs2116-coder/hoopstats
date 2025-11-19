@@ -751,6 +751,12 @@ if team_pdf is not None:
                 "FG% Corner 3s",
             ]
 
+            # Make sure FG% columns *exist* even if the parser didn't find them
+            for col in num_cols_fg:
+                if col not in df_shooting.columns:
+                    df_shooting[col] = 0.0
+
+            # Now safely convert all FGA% + FG% columns to numeric
             for c in num_cols_fga + num_cols_fg:
                 if c in df_shooting.columns:
                     df_shooting[c] = pd.to_numeric(df_shooting[c], errors="coerce").fillna(0.0)
@@ -766,18 +772,20 @@ if team_pdf is not None:
                 + df_shooting["FGA% Corner 3s"]
             )
 
-            # This df_fg_zones is just the FG% columns from the same table
-            df_fg_zones = df_shooting[
-                [
-                    "Jersey",
-                    "Player",
-                    "FG% At Rim",
-                    "FG% In Paint",
-                    "FG% Midrange 2s",
-                    "FG% Above Break 3s",
-                    "FG% Corner 3s",
-                ]
-            ].copy()
+            # ---------- FG% ZONES VIEW (SAFE SELECTION) ----------
+            fg_zone_cols_desired = [
+                "Jersey",
+                "Player",
+                "FG% At Rim",
+                "FG% In Paint",
+                "FG% Midrange 2s",
+                "FG% Above Break 3s",
+                "FG% Corner 3s",
+            ]
+            # intersect with actual columns just in case
+            fg_zone_cols = [c for c in fg_zone_cols_desired if c in df_shooting.columns]
+
+            df_fg_zones = df_shooting[fg_zone_cols].copy()
 
             # ================================================================
             #                      SHOT DIET PREVIEW
@@ -795,8 +803,9 @@ if team_pdf is not None:
                 "FGA% Corner 3s",
                 "FGA% All 3 PT Attempts",
             ]
-
-            st.dataframe(df_shooting[preview_cols], use_container_width=True)
+            # only show columns that actually exist
+            preview_cols_existing = [c for c in preview_cols if c in df_shooting.columns]
+            st.dataframe(df_shooting[preview_cols_existing], use_container_width=True)
 
             # ================================================================
             #          REQUIRE OVERVIEW CSV (WITH FGA) FOR MAKES/ATTEMPTS
@@ -842,7 +851,6 @@ if team_pdf is not None:
                     #                         FG% PREVIEW
                     # ============================================================
                     st.markdown("### **FG% Table Preview (From Shot Zone FG%)**")
-
                     fg_preview_cols = [
                         "Jersey",
                         "Player",
@@ -852,8 +860,8 @@ if team_pdf is not None:
                         "FG% Above Break 3s",
                         "FG% Corner 3s",
                     ]
-
-                    st.dataframe(df_fg[fg_preview_cols], use_container_width=True)
+                    fg_preview_cols_existing = [c for c in fg_preview_cols if c in df_fg.columns]
+                    st.dataframe(df_fg[fg_preview_cols_existing], use_container_width=True)
 
                     # ============================================================
                     #          COMPUTE ZONE MAKES / ATTEMPTS USING FGA
@@ -874,10 +882,12 @@ if team_pdf is not None:
                     for idx, row in df_fg.iterrows():
                         total_fga = row.get("fga", 0)
                         if pd.isna(total_fga) or total_fga <= 0:
-                            # Leave as 0 attempts / 0 makes / 0% FG
                             continue
 
                         for zone_name, fga_pct_col, fg_pct_col in zone_defs:
+                            if fga_pct_col not in df_fg.columns or fg_pct_col not in df_fg.columns:
+                                continue
+
                             fga_pct = row.get(fga_pct_col)
                             fg_pct = row.get(fg_pct_col)
 
