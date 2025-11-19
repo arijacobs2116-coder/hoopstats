@@ -675,6 +675,190 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+# ---------- ADVANCED STATS PIPELINE ----------
+
+df_stats = None
+
+if pasted_kenpom.strip():
+    try:
+        df_stats = parse_kenpom_paste(pasted_kenpom)
+    except Exception as e:
+        st.error(f"Error parsing pasted KenPom text: {e}")
+        df_stats = None
+elif uploaded_file is not None:
+    try:
+        df_stats = load_and_clean_kenpom_csv(uploaded_file)
+    except Exception as e:
+        st.error(f"Error reading advanced stats CSV: {e}")
+        df_stats = None
+
+if df_stats is not None:
+    if title_text == "":
+        st.error("❗ Please enter a team name before generating the Advanced Stats DOCX.")
+    elif logo_bytes is None:
+        st.error("❗ Please upload a team logo before generating the Advanced Stats DOCX.")
+    else:
+        st.subheader("Parsed Advanced Stats Table")
+        st.dataframe(df_stats, use_container_width=True)
+
+        categories = [
+            ("ORtg", "Offensive Rating"),
+            ("FTRate", "Free-Throw Rate"),
+            ("%Poss", "% of Possessions"),
+            ("eFG%", "Effective FG%"),
+            ("%Shots", "% of Shots"),
+            ("TS%", "True Shooting %"),
+            ("OR%", "Offensive Rebound %"),
+            ("DR%", "Defensive Rebound %"),
+            ("TORate", "Turnover Rate"),
+            ("ARate", "Assist Rate"),
+            ("FD/40", "Fouls Drawn per 40"),
+            ("FC/40", "Fouls Committed per 40"),
+            ("Blk%", "Block %"),
+            ("Stl%", "Steal %"),
+        ]
+
+        doc = Document()
+        style = doc.styles["Normal"]
+        font = style.font
+        font.name = "Calibri"
+        font.size = Pt(11)
+
+        if logo_bytes:
+            logo_stream = BytesIO(logo_bytes)
+            doc.add_picture(logo_stream, width=Inches(1.2))
+            last_paragraph = doc.paragraphs[-1]
+            last_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        title_paragraph = doc.add_paragraph()
+        run = title_paragraph.add_run(f"{title_text} ADVANCED STATISTICS")
+        run.bold = True
+        run.font.size = Pt(14)
+        if header_color is not None:
+            run.font.color.rgb = header_color
+        title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        title_paragraph.paragraph_format.space_after = Pt(4)
+
+        pairs = []
+        for i in range(0, len(categories), 2):
+            if i + 1 < len(categories):
+                pairs.append((categories[i], categories[i + 1]))
+            else:
+                pairs.append((categories[i], None))
+
+        for left_cat, right_cat in pairs:
+            table = doc.add_table(rows=1, cols=2)
+            table.autofit = True
+            remove_table_borders(table)
+
+            left_cell = table.rows[0].cells[0]
+            right_cell = table.rows[0].cells[1]
+
+            # LEFT CATEGORY
+            if left_cat is not None:
+                col, title = left_cat
+                df_sorted = (
+                    df_stats.sort_values(by=col, ascending=False)
+                    if col in df_stats.columns
+                    else None
+                )
+
+                p = left_cell.add_paragraph()
+                r = p.add_run(title)
+                r.bold = True
+                r.font.size = Pt(16)
+                if header_color is not None:
+                    r.font.color.rgb = header_color
+                p.paragraph_format.space_before = Pt(0)
+                p.paragraph_format.space_after = Pt(0)
+                p.paragraph_format.line_spacing = Pt(11)
+
+                if df_sorted is not None:
+                    for rank, (_, row) in enumerate(df_sorted.iterrows(), start=1):
+                        value = row[col]
+                        if pd.isna(value):
+                            continue
+                        jersey = clean_jersey(row["Jersey"])
+                        name = str(row["Player"])
+
+                        if abs(value - int(value)) < 1e-6:
+                            val_str = f"{int(value)}"
+                        else:
+                            val_str = f"{value:.1f}"
+
+                        suffix = "" if col in ["ORtg", "FC/40", "FD/40"] else "%"
+
+                        pl = left_cell.add_paragraph()
+                        pr = pl.add_run(f"{rank}. #{jersey} {name} – {val_str}{suffix}")
+                        pr.font.size = Pt(11)
+                        pl.paragraph_format.space_before = Pt(0)
+                        pl.paragraph_format.space_after = Pt(0)
+                        pl.paragraph_format.line_spacing = Pt(11)
+
+            # RIGHT CATEGORY
+            if right_cat is not None:
+                col, title = right_cat
+                df_sorted = (
+                    df_stats.sort_values(by=col, ascending=False)
+                    if col in df_stats.columns
+                    else None
+                )
+
+                p = right_cell.add_paragraph()
+                r = p.add_run(title)
+                r.bold = True
+                r.font.size = Pt(16)
+                if header_color is not None:
+                    r.font.color.rgb = header_color
+                p.paragraph_format.space_before = Pt(0)
+                p.paragraph_format.space_after = Pt(0)
+                p.paragraph_format.line_spacing = Pt(11)
+
+                if df_sorted is not None:
+                    for rank, (_, row) in enumerate(df_sorted.iterrows(), start=1):
+                        value = row[col]
+                        if pd.isna(value):
+                            continue
+                        jersey = clean_jersey(row["Jersey"])
+                        name = str(row["Player"])
+
+                        if abs(value - int(value)) < 1e-6:
+                            val_str = f"{int(value)}"
+                        else:
+                            val_str = f"{value:.1f}"
+
+                        suffix = "" if col in ["ORtg", "FC/40", "FD/40"] else "%"
+
+                        pl = right_cell.add_paragraph()
+                        pr = pl.add_run(f"{rank}. #{jersey} {name} – {val_str}{suffix}")
+                        pr.font.size = Pt(11)
+                        pl.paragraph_format.space_before = Pt(0)
+                        pl.paragraph_format.space_after = Pt(0)
+                        pl.paragraph_format.line_spacing = Pt(11)
+
+            sp = doc.add_paragraph()
+            sp.paragraph_format.space_before = Pt(0)
+            sp.paragraph_format.space_after = Pt(0)
+            sp.paragraph_format.line_spacing = Pt(0.25)
+
+        docx_buffer = BytesIO()
+        doc.save(docx_buffer)
+        docx_buffer.seek(0)
+
+        filename = f"{safe_team_name}_advanced_statistics.docx"
+
+        st.download_button(
+            label="Download Advanced Stats DOCX",
+            data=docx_buffer,
+            file_name=filename,
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            key="download_advanced",
+        )
+
+    
+
+
+
 st.markdown("---")  # Divider between sections
 
 
@@ -963,8 +1147,6 @@ if team_pdf is not None:
                         continue
 
                     # Grab ALL numeric-like tokens (with or without %)
-                    # Example line from CBB Analytics:
-                    #   "1.9 17.2% 60.0"  -> [ "1.9", "17.2%", "60.0" ]
                     numeric_tokens = [
                         t for t in parts
                         if re.match(r"^-?\d+(\.\d+)?%?$", t)
@@ -1180,13 +1362,15 @@ if team_pdf is not None:
                     )
 
                     # ========================================================
-                    #              BUILD SHOT DIET DOCX  (UNCHANGED)
+                    #              BUILD SHOT DIET DOCX  (CONDENSED)
                     # ========================================================
                     shooting_doc = Document()
                     style = shooting_doc.styles["Normal"]
                     font = style.font
                     font.name = "Calibri"
                     font.size = Pt(11)
+                    style.paragraph_format.space_before = Pt(0)
+                    style.paragraph_format.space_after = Pt(0)
 
                     if logo_bytes:
                         logo_stream = BytesIO(logo_bytes)
@@ -1216,21 +1400,20 @@ if team_pdf is not None:
 
                     max_rows = max(len(left_zone_categories), len(right_zone_categories))
 
+                    # ONE table for all Shot Diet sections
+                    shot_table = shooting_doc.add_table(rows=max_rows, cols=2)
+                    shot_table.autofit = True
+                    remove_table_borders(shot_table)
+
                     for i in range(max_rows):
-                        left_cat = left_zone_categories[i] if i < len(left_zone_categories) else None
-                        right_cat = right_zone_categories[i] if i < len(right_zone_categories) else None
-
-                        table = shooting_doc.add_table(rows=1, cols=2)
-                        table.autofit = True
-                        remove_table_borders(table)
-
-                        left_cell = table.rows[0].cells[0]
-                        right_cell = table.rows[0].cells[1]
+                        left_cell = shot_table.rows[i].cells[0]
+                        right_cell = shot_table.rows[i].cells[1]
 
                         # LEFT side
-                        if left_cat is not None:
-                            col, ttl = left_cat
-                            p = left_cell.add_paragraph()
+                        if i < len(left_zone_categories):
+                            col, ttl = left_zone_categories[i]
+                            p = left_cell.paragraphs[0]
+                            p.text = ""
                             r = p.add_run(ttl)
                             r.bold = True
                             r.font.size = Pt(16)
@@ -1246,9 +1429,10 @@ if team_pdf is not None:
                                     left_cell.add_paragraph(f"{rank}. #{jersey} {name} – {val_str}")
 
                         # RIGHT side
-                        if right_cat is not None:
-                            col, ttl = right_cat
-                            p = right_cell.add_paragraph()
+                        if i < len(right_zone_categories):
+                            col, ttl = right_zone_categories[i]
+                            p = right_cell.paragraphs[0]
+                            p.text = ""
                             r = p.add_run(ttl)
                             r.bold = True
                             r.font.size = Pt(16)
@@ -1276,12 +1460,14 @@ if team_pdf is not None:
                     )
 
                     # ========================================================
-                    #                BUILD 2-COLUMN FG% DOCX (UNCHANGED)
+                    #                BUILD 2-COLUMN FG% DOCX (CONDENSED)
                     # ========================================================
                     fg_doc = Document()
                     fg_style = fg_doc.styles["Normal"]
                     fg_style.font.name = "Calibri"
                     fg_style.font.size = Pt(11)
+                    fg_style.paragraph_format.space_before = Pt(0)
+                    fg_style.paragraph_format.space_after = Pt(0)
 
                     if logo_bytes:
                         fg_doc.add_picture(BytesIO(logo_bytes), width=Inches(1.2))
@@ -1311,19 +1497,19 @@ if team_pdf is not None:
 
                     max_len_fg = max(len(fg_left_sections), len(fg_right_sections))
 
-                    for i in range(max_len_fg):
-                        left_sec = fg_left_sections[i] if i < len(fg_left_sections) else None
-                        right_sec = fg_right_sections[i] if i < len(fg_right_sections) else None
+                    # ONE table for all FG% sections
+                    fg_table = fg_doc.add_table(rows=max_len_fg, cols=2)
+                    remove_table_borders(fg_table)
 
-                        table = fg_doc.add_table(rows=1, cols=2)
-                        remove_table_borders(table)
-                        left_cell = table.rows[0].cells[0]
-                        right_cell = table.rows[0].cells[1]
+                    for i in range(max_len_fg):
+                        left_cell = fg_table.rows[i].cells[0]
+                        right_cell = fg_table.rows[i].cells[1]
 
                         # ---------- LEFT SIDE (2PT) ----------
-                        if left_sec is not None:
-                            title, fg_col, make_col, att_col = left_sec
-                            p = left_cell.add_paragraph()
+                        if i < len(fg_left_sections):
+                            title, fg_col, make_col, att_col = fg_left_sections[i]
+                            p = left_cell.paragraphs[0]
+                            p.text = ""
                             r = p.add_run(title)
                             r.bold = True
                             r.font.size = Pt(16)
@@ -1348,9 +1534,10 @@ if team_pdf is not None:
                                     left_cell.add_paragraph(line)
 
                         # ---------- RIGHT SIDE (3PT) ----------
-                        if right_sec is not None:
-                            title, fg_col, make_col, att_col = right_sec
-                            p = right_cell.add_paragraph()
+                        if i < len(fg_right_sections):
+                            title, fg_col, make_col, att_col = fg_right_sections[i]
+                            p = right_cell.paragraphs[0]
+                            p.text = ""
                             r = p.add_run(title)
                             r.bold = True
                             r.font.size = Pt(16)
@@ -1391,188 +1578,6 @@ else:
         "⬆️ Upload the CBB Analytics team player-profiles PDF to extract zone FGA% and generate Shot Diet + FG% DOCX."
     )
 
-
-# ---------- ADVANCED STATS PIPELINE ----------
-
-df_stats = None
-
-if pasted_kenpom.strip():
-    try:
-        df_stats = parse_kenpom_paste(pasted_kenpom)
-    except Exception as e:
-        st.error(f"Error parsing pasted KenPom text: {e}")
-        df_stats = None
-elif uploaded_file is not None:
-    try:
-        df_stats = load_and_clean_kenpom_csv(uploaded_file)
-    except Exception as e:
-        st.error(f"Error reading advanced stats CSV: {e}")
-        df_stats = None
-
-if df_stats is not None:
-    if title_text == "":
-        st.error("❗ Please enter a team name before generating the Advanced Stats DOCX.")
-    elif logo_bytes is None:
-        st.error("❗ Please upload a team logo before generating the Advanced Stats DOCX.")
-    else:
-        st.subheader("Parsed Advanced Stats Table")
-        st.dataframe(df_stats, use_container_width=True)
-
-        categories = [
-            ("ORtg", "Offensive Rating"),
-            ("FTRate", "Free-Throw Rate"),
-            ("%Poss", "% of Possessions"),
-            ("eFG%", "Effective FG%"),
-            ("%Shots", "% of Shots"),
-            ("TS%", "True Shooting %"),
-            ("OR%", "Offensive Rebound %"),
-            ("DR%", "Defensive Rebound %"),
-            ("TORate", "Turnover Rate"),
-            ("ARate", "Assist Rate"),
-            ("FD/40", "Fouls Drawn per 40"),
-            ("FC/40", "Fouls Committed per 40"),
-            ("Blk%", "Block %"),
-            ("Stl%", "Steal %"),
-        ]
-
-        doc = Document()
-        style = doc.styles["Normal"]
-        font = style.font
-        font.name = "Calibri"
-        font.size = Pt(11)
-
-        if logo_bytes:
-            logo_stream = BytesIO(logo_bytes)
-            doc.add_picture(logo_stream, width=Inches(1.2))
-            last_paragraph = doc.paragraphs[-1]
-            last_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-        title_paragraph = doc.add_paragraph()
-        run = title_paragraph.add_run(f"{title_text} ADVANCED STATISTICS")
-        run.bold = True
-        run.font.size = Pt(14)
-        if header_color is not None:
-            run.font.color.rgb = header_color
-        title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        title_paragraph.paragraph_format.space_after = Pt(4)
-
-        pairs = []
-        for i in range(0, len(categories), 2):
-            if i + 1 < len(categories):
-                pairs.append((categories[i], categories[i + 1]))
-            else:
-                pairs.append((categories[i], None))
-
-        for left_cat, right_cat in pairs:
-            table = doc.add_table(rows=1, cols=2)
-            table.autofit = True
-            remove_table_borders(table)
-
-            left_cell = table.rows[0].cells[0]
-            right_cell = table.rows[0].cells[1]
-
-            # LEFT CATEGORY
-            if left_cat is not None:
-                col, title = left_cat
-                df_sorted = (
-                    df_stats.sort_values(by=col, ascending=False)
-                    if col in df_stats.columns
-                    else None
-                )
-
-                p = left_cell.add_paragraph()
-                r = p.add_run(title)
-                r.bold = True
-                r.font.size = Pt(16)
-                if header_color is not None:
-                    r.font.color.rgb = header_color
-                p.paragraph_format.space_before = Pt(0)
-                p.paragraph_format.space_after = Pt(0)
-                p.paragraph_format.line_spacing = Pt(11)
-
-                if df_sorted is not None:
-                    for rank, (_, row) in enumerate(df_sorted.iterrows(), start=1):
-                        value = row[col]
-                        if pd.isna(value):
-                            continue
-                        jersey = clean_jersey(row["Jersey"])
-                        name = str(row["Player"])
-
-                        if abs(value - int(value)) < 1e-6:
-                            val_str = f"{int(value)}"
-                        else:
-                            val_str = f"{value:.1f}"
-
-                        suffix = "" if col in ["ORtg", "FC/40", "FD/40"] else "%"
-
-                        pl = left_cell.add_paragraph()
-                        pr = pl.add_run(f"{rank}. #{jersey} {name} – {val_str}{suffix}")
-                        pr.font.size = Pt(11)
-                        pl.paragraph_format.space_before = Pt(0)
-                        pl.paragraph_format.space_after = Pt(0)
-                        pl.paragraph_format.line_spacing = Pt(11)
-
-            # RIGHT CATEGORY
-            if right_cat is not None:
-                col, title = right_cat
-                df_sorted = (
-                    df_stats.sort_values(by=col, ascending=False)
-                    if col in df_stats.columns
-                    else None
-                )
-
-                p = right_cell.add_paragraph()
-                r = p.add_run(title)
-                r.bold = True
-                r.font.size = Pt(16)
-                if header_color is not None:
-                    r.font.color.rgb = header_color
-                p.paragraph_format.space_before = Pt(0)
-                p.paragraph_format.space_after = Pt(0)
-                p.paragraph_format.line_spacing = Pt(11)
-
-                if df_sorted is not None:
-                    for rank, (_, row) in enumerate(df_sorted.iterrows(), start=1):
-                        value = row[col]
-                        if pd.isna(value):
-                            continue
-                        jersey = clean_jersey(row["Jersey"])
-                        name = str(row["Player"])
-
-                        if abs(value - int(value)) < 1e-6:
-                            val_str = f"{int(value)}"
-                        else:
-                            val_str = f"{value:.1f}"
-
-                        suffix = "" if col in ["ORtg", "FC/40", "FD/40"] else "%"
-
-                        pl = right_cell.add_paragraph()
-                        pr = pl.add_run(f"{rank}. #{jersey} {name} – {val_str}{suffix}")
-                        pr.font.size = Pt(11)
-                        pl.paragraph_format.space_before = Pt(0)
-                        pl.paragraph_format.space_after = Pt(0)
-                        pl.paragraph_format.line_spacing = Pt(11)
-
-            sp = doc.add_paragraph()
-            sp.paragraph_format.space_before = Pt(0)
-            sp.paragraph_format.space_after = Pt(0)
-            sp.paragraph_format.line_spacing = Pt(0.25)
-
-        docx_buffer = BytesIO()
-        doc.save(docx_buffer)
-        docx_buffer.seek(0)
-
-        filename = f"{safe_team_name}_advanced_statistics.docx"
-
-        st.download_button(
-            label="Download Advanced Stats DOCX",
-            data=docx_buffer,
-            file_name=filename,
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            key="download_advanced",
-        )
-
-    
 
 
 
