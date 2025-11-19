@@ -727,7 +727,7 @@ if team_pdf is not None:
         st.error("❗ Please upload a team logo before generating the Shot Diet and FG% DOCX files.")
     else:
         # ================================================================
-        #  READ PDF + EXTRACT ZONE FGA% (SHOT DIET)
+        #  READ PDF + EXTRACT ZONE FGA% + FG% (ONE TABLE)
         # ================================================================
         team_pdf.seek(0)
         try:
@@ -736,16 +736,26 @@ if team_pdf is not None:
             st.error(f"Could not extract shooting-by-region data from PDF: {e}")
         else:
             # ---------- Clean numeric ----------
-            num_cols = [
+            num_cols_fga = [
                 "FGA% At Rim",
                 "FGA% In Paint",
                 "FGA% Midrange 2s",
                 "FGA% Above Break 3s",
                 "FGA% Corner 3s",
             ]
-            for c in num_cols:
-                df_shooting[c] = pd.to_numeric(df_shooting[c], errors="coerce")
+            num_cols_fg = [
+                "FG% At Rim",
+                "FG% In Paint",
+                "FG% Midrange 2s",
+                "FG% Above Break 3s",
+                "FG% Corner 3s",
+            ]
 
+            for c in num_cols_fga + num_cols_fg:
+                if c in df_shooting.columns:
+                    df_shooting[c] = pd.to_numeric(df_shooting[c], errors="coerce").fillna(0.0)
+
+            # All 2pt / 3pt FGA% for Shot Diet
             df_shooting["FGA% All 2 PT Attempts"] = (
                 df_shooting["FGA% At Rim"]
                 + df_shooting["FGA% In Paint"]
@@ -755,6 +765,19 @@ if team_pdf is not None:
                 df_shooting["FGA% Above Break 3s"]
                 + df_shooting["FGA% Corner 3s"]
             )
+
+            # This df_fg_zones is just the FG% columns from the same table
+            df_fg_zones = df_shooting[
+                [
+                    "Jersey",
+                    "Player",
+                    "FG% At Rim",
+                    "FG% In Paint",
+                    "FG% Midrange 2s",
+                    "FG% Above Break 3s",
+                    "FG% Corner 3s",
+                ]
+            ].copy()
 
             # ================================================================
             #                      SHOT DIET PREVIEW
@@ -776,139 +799,13 @@ if team_pdf is not None:
             st.dataframe(df_shooting[preview_cols], use_container_width=True)
 
             # ================================================================
-            #          SIMPLE FG% PARSE FROM SHOT ZONE TABLE (PDF)
-            # ================================================================
-            def parse_cbb_team_pdf_fg_zones(uploaded_pdf) -> pd.DataFrame:
-                """
-                Reads the same CBB Analytics team PDF and extracts
-                FG% by region for each player from the
-                'Shot Zone GP* FGA/G FGA% FG%' table.
-
-                Returns columns:
-                  Jersey, Player,
-                  FG% At Rim, FG% In Paint, FG% Midrange 2s,
-                  FG% Above Break 3s, FG% Corner 3s
-                """
-                uploaded_pdf.seek(0)
-                pdf_bytes = uploaded_pdf.read()
-                reader_local = PdfReader(BytesIO(pdf_bytes))
-
-                rows = []
-                zones = [
-                    "At Rim",
-                    "In Paint",
-                    "Midrange 2s",
-                    "Above Break 3s",
-                    "Corner 3s",
-                    "At Rim + 3s",
-                    "Heaves",
-                ]
-
-                for page in reader_local.pages:
-                    try:
-                        text = page.extract_text()
-                    except Exception:
-                        continue
-                    if not text or "Shot Zone" not in text or "FGA%" not in text or "FG%" not in text:
-                        continue
-
-                    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-
-                    # Player header: "Name (#12, Guard, 6'4\") : Profile"
-                    header_line = lines[0]
-                    m = re.match(r"^(.*?)\s*\(#(\d+)", header_line)
-                    if m:
-                        name = m.group(1).strip()
-                        jersey = m.group(2).strip()
-                    else:
-                        name = header_line.split("(")[0].strip()
-                        jersey = ""
-
-                    # Find shot-zone header
-                    shot_idx = None
-                    for i, ln in enumerate(lines):
-                        if "Shot Zone GP* FGA/G FGA% FG%" in ln:
-                            shot_idx = i
-                            break
-                    if shot_idx is None:
-                        continue
-
-                    fg_vals = []
-
-                    for ln in lines[shot_idx + 1:]:
-                        # stop when we hit DNQ / next section
-                        if ln.startswith("DNQ") or "Zone % of Shots" in ln or "Zone FG%" in ln:
-                            break
-
-                        parts = ln.split()
-                        percent_tokens = [t for t in parts if "%" in t]
-                        if not percent_tokens:
-                            continue
-
-                        # Expect: ... FGA% FG%
-                        if len(percent_tokens) >= 2:
-                            fg_token = percent_tokens[1]
-                        else:
-                            fg_token = None
-
-                        if fg_token is None:
-                            fg_vals.append(float("nan"))
-                        else:
-                            try:
-                                fg_vals.append(float(fg_token.replace("%", "")))
-                            except Exception:
-                                fg_vals.append(float("nan"))
-
-                        if len(fg_vals) >= len(zones):
-                            break
-
-                    while len(fg_vals) < len(zones):
-                        fg_vals.append(float("nan"))
-
-                    row = {"Jersey": jersey, "Player": name}
-                    for i, z in enumerate(zones):
-                        row[f"FG% {z}"] = fg_vals[i]
-                    rows.append(row)
-
-                df = pd.DataFrame(rows)
-
-                keep_cols = [
-                    "Jersey",
-                    "Player",
-                    "FG% At Rim",
-                    "FG% In Paint",
-                    "FG% Midrange 2s",
-                    "FG% Above Break 3s",
-                    "FG% Corner 3s",
-                ]
-                
-                if df.empty:
-                    df = pd.DataFrame(columns=keep_cols)
-                for col in keep_cols:
-                    if col not in df.columns:
-                        df[col] = float("nan")
-                        
-                df = df[keep_cols].copy()
-
-                # Make FG% numeric and fill NaN with 0.0
-                fg_cols = [c for c in keep_cols if c not in ("Jersey", "Player")]
-                for c in fg_cols:
-                    df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
-
-                return df
-
-            # parse FG% zones from PDF → df_fg_zones
-            df_fg_zones = parse_cbb_team_pdf_fg_zones(team_pdf)
-
-            # ================================================================
-            #          NOW REQUIRE OVERVIEW CSV (WITH FGA) FOR MAKES/ATTEMPTS
+            #          REQUIRE OVERVIEW CSV (WITH FGA) FOR MAKES/ATTEMPTS
             # ================================================================
             if overview_file is None:
                 st.error(
                     "❗ Upload a CBB Overview CSV (with an 'fga' column) to generate the FG% DOCX with makes/attempts."
                 )
             else:
-                # Load overview with FGA
                 overview_file.seek(0)
                 try:
                     df_overview_all = load_and_clean_overview_csv(overview_file)
@@ -925,14 +822,26 @@ if team_pdf is not None:
 
                     # Merge: FG% by zone + FGA% by zone + FGA total
                     df_fg = df_fg_zones.merge(
-                        df_shooting, on=["Jersey", "Player"], how="left"
+                        df_shooting[
+                            [
+                                "Jersey",
+                                "Player",
+                                "FGA% At Rim",
+                                "FGA% In Paint",
+                                "FGA% Midrange 2s",
+                                "FGA% Above Break 3s",
+                                "FGA% Corner 3s",
+                            ]
+                        ],
+                        on=["Jersey", "Player"],
+                        how="left",
                     )
                     df_fg = df_fg.merge(df_fga, on=["Jersey", "Player"], how="left")
 
                     # ============================================================
                     #                         FG% PREVIEW
                     # ============================================================
-                    st.markdown("### **FG% Table Preview (From Shooting by Region FG%)**")
+                    st.markdown("### **FG% Table Preview (From Shot Zone FG%)**")
 
                     fg_preview_cols = [
                         "Jersey",
@@ -957,7 +866,6 @@ if team_pdf is not None:
                         ("Corner 3s",      "FGA% Corner 3s",      "FG% Corner 3s"),
                     ]
 
-                    # Initialize columns
                     for zone_name, _, _ in zone_defs:
                         df_fg[f"{zone_name} Attempts"] = 0
                         df_fg[f"{zone_name} Makes"] = 0
@@ -974,7 +882,6 @@ if team_pdf is not None:
                             fg_pct = row.get(fg_pct_col)
 
                             if pd.isna(fga_pct) or pd.isna(fg_pct):
-                                # keep 0/0 0%
                                 continue
 
                             zone_attempts = round(total_fga * (fga_pct / 100.0))
@@ -991,7 +898,6 @@ if team_pdf is not None:
                     # ============================================================
                     #      TOTAL 2PT & 3PT MAKES / ATTEMPTS / FG% PER PLAYER
                     # ============================================================
-                    # 2pt zones: At Rim, In Paint, Midrange 2s
                     df_fg["Total 2pt Attempts"] = (
                         df_fg["At Rim Attempts"]
                         + df_fg["In Paint Attempts"]
@@ -1010,7 +916,6 @@ if team_pdf is not None:
                         / df_fg.loc[mask_2, "Total 2pt Attempts"]
                     )
 
-                    # 3pt zones: Above Break 3s, Corner 3s
                     df_fg["Total 3pt Attempts"] = (
                         df_fg["Above Break 3s Attempts"]
                         + df_fg["Corner 3s Attempts"]
@@ -1144,19 +1049,17 @@ if team_pdf is not None:
                     title_p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     title_p2.paragraph_format.space_after = Pt(4)
 
-                    # LEFT COLUMN = all 2pt-related sections (incl. total 2pt)
                     fg_left_sections = [
-                        ("FG% – At the Rim",         "At Rim FG",       "At Rim Makes",       "At Rim Attempts"),
-                        ("FG% – Paint 2s",           "In Paint FG",     "In Paint Makes",     "In Paint Attempts"),
-                        ("FG% – Mid-Range 2s",       "Midrange 2s FG",  "Midrange 2s Makes",  "Midrange 2s Attempts"),
-                        ("FG% – Total 2pt",          "Total 2pt FG",    "Total 2pt Makes",    "Total 2pt Attempts"),
+                        ("FG% - At the Rim",       "At Rim FG",       "At Rim Makes",       "At Rim Attempts"),
+                        ("FG% - Paint 2s",         "In Paint FG",     "In Paint Makes",     "In Paint Attempts"),
+                        ("FG% - Mid-Range 2s",     "Midrange 2s FG",  "Midrange 2s Makes",  "Midrange 2s Attempts"),
+                        ("FG% - All 2pt Attempts", "Total 2pt FG",    "Total 2pt Makes",    "Total 2pt Attempts"),
                     ]
 
-                    # RIGHT COLUMN = all 3pt-related sections (incl. total 3pt)
                     fg_right_sections = [
                         ("FG% – Above-the Break 3s", "Above Break 3s FG", "Above Break 3s Makes", "Above Break 3s Attempts"),
                         ("FG% – Corner 3s",          "Corner 3s FG",      "Corner 3s Makes",      "Corner 3s Attempts"),
-                        ("FG% – Total 3pt",          "Total 3pt FG",      "Total 3pt Makes",      "Total 3pt Attempts"),
+                        ("FG% - All 3pt Attempts",   "Total 3pt FG",      "Total 3pt Makes",      "Total 3pt Attempts"),
                     ]
 
                     max_len_fg = max(len(fg_left_sections), len(fg_right_sections))
@@ -1170,10 +1073,9 @@ if team_pdf is not None:
                         left_cell = table.rows[0].cells[0]
                         right_cell = table.rows[0].cells[1]
 
-                        # ---------- LEFT SIDE (2PT) ----------
+                        # LEFT (2pt)
                         if left_sec is not None:
                             title, fg_col, make_col, att_col = left_sec
-
                             p = left_cell.add_paragraph()
                             r = p.add_run(title)
                             r.bold = True
@@ -1188,7 +1090,6 @@ if team_pdf is not None:
                                     makes = int(row_fg.get(make_col, 0) or 0)
                                     attempts = int(row_fg.get(att_col, 0) or 0)
 
-                                    # If missing or zero attempts → show 0.0% (0/0)
                                     if pd.isna(raw_val) or attempts == 0:
                                         val_display = 0.0
                                     else:
@@ -1199,10 +1100,9 @@ if team_pdf is not None:
                                     line = f"{rank}. #{jersey} {name} – {val_display:.1f}% ({makes}/{attempts})"
                                     left_cell.add_paragraph(line)
 
-                        # ---------- RIGHT SIDE (3PT) ----------
+                        # RIGHT (3pt)
                         if right_sec is not None:
                             title, fg_col, make_col, att_col = right_sec
-
                             p = right_cell.add_paragraph()
                             r = p.add_run(title)
                             r.bold = True
@@ -1217,7 +1117,6 @@ if team_pdf is not None:
                                     makes = int(row_fg.get(make_col, 0) or 0)
                                     attempts = int(row_fg.get(att_col, 0) or 0)
 
-                                    # If missing or zero attempts → show 0.0% (0/0)
                                     if pd.isna(raw_val) or attempts == 0:
                                         val_display = 0.0
                                     else:
