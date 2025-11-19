@@ -730,6 +730,7 @@ if team_pdf is not None:
         #  PARSE SHOT ZONE TABLE ONCE: GET BOTH FGA% AND FG% BY ZONE
         # ================================================================
         from io import BytesIO
+        import re
 
         pdf_bytes = team_pdf.read()  # read once
 
@@ -779,7 +780,7 @@ if team_pdf is not None:
                 # Find the shot-zone header line
                 shot_idx = None
                 for i, ln in enumerate(lines):
-                    if "Shot Zone" in ln and "FGA" in ln and "FG%" in ln:
+                    if "Shot Zone" in ln and "FGA" in ln:
                         shot_idx = i
                         break
                 if shot_idx is None:
@@ -802,25 +803,30 @@ if team_pdf is not None:
                     if not parts:
                         continue
 
-                    percent_tokens = [t for t in parts if "%" in t]
-                    if not percent_tokens:
+                    # Grab ALL numeric-like tokens (with or without %)
+                    # Example line from CBB Analytics:
+                    #   "1.9 17.2% 60.0"  -> [ "1.9", "17.2%", "60.0" ]
+                    numeric_tokens = [
+                        t for t in parts
+                        if re.match(r"^-?\d+(\.\d+)?%?$", t)
+                    ]
+
+                    # Need at least 2 numeric tokens to get FGA% and FG%
+                    if len(numeric_tokens) < 2:
                         continue
 
-                    # First % on the line is FGA%, second (if present) is FG%
-                    fga_token = percent_tokens[0]
-                    fg_token = percent_tokens[1] if len(percent_tokens) > 1 else None
+                    # Last two numeric tokens on the line are FGA% and FG%
+                    fga_token = numeric_tokens[-2]
+                    fg_token = numeric_tokens[-1]
 
                     try:
                         fga_vals.append(float(fga_token.replace("%", "")))
                     except Exception:
                         fga_vals.append(float("nan"))
 
-                    if fg_token:
-                        try:
-                            fg_vals.append(float(fg_token.replace("%", "")))
-                        except Exception:
-                            fg_vals.append(float("nan"))
-                    else:
+                    try:
+                        fg_vals.append(float(fg_token.replace("%", "")))
+                    except Exception:
                         fg_vals.append(float("nan"))
 
                     if len(fga_vals) >= len(zones):
@@ -1225,7 +1231,6 @@ else:
     st.info(
         "⬆️ Upload the CBB Analytics team player-profiles PDF to extract zone FGA% and generate Shot Diet + FG% DOCX."
     )
-
 
 
 # ---------- ADVANCED STATS PIPELINE ----------
