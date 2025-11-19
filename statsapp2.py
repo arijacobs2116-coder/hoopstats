@@ -727,41 +727,29 @@ if team_pdf is not None:
         st.error("❗ Please upload a team logo before generating the Shot Diet and FG% DOCX files.")
     else:
         # ================================================================
-        #  READ PDF + EXTRACT ZONE FGA% + FG% (ONE TABLE)
+        #  READ PDF + EXTRACT ZONE FGA% + FG% (SHOT DIET + FG%)
         # ================================================================
         team_pdf.seek(0)
         try:
+            # This function must now return BOTH FGA% and FG% columns
             df_shooting = parse_cbb_team_pdf_shooting_zones(team_pdf)
         except Exception as e:
             st.error(f"Could not extract shooting-by-region data from PDF: {e}")
         else:
-            # ---------- Clean numeric ----------
-            num_cols_fga = [
+            # ---------- Ensure numeric & add aggregate FGA% ----------
+            fga_cols = [
                 "FGA% At Rim",
                 "FGA% In Paint",
                 "FGA% Midrange 2s",
                 "FGA% Above Break 3s",
                 "FGA% Corner 3s",
             ]
-            num_cols_fg = [
-                "FG% At Rim",
-                "FG% In Paint",
-                "FG% Midrange 2s",
-                "FG% Above Break 3s",
-                "FG% Corner 3s",
-            ]
+            for c in fga_cols:
+                if c not in df_shooting.columns:
+                    df_shooting[c] = float("nan")
+                df_shooting[c] = pd.to_numeric(df_shooting[c], errors="coerce")
 
-            # Make sure FG% columns *exist* even if the parser didn't find them
-            for col in num_cols_fg:
-                if col not in df_shooting.columns:
-                    df_shooting[col] = 0.0
-
-            # Now safely convert all FGA% + FG% columns to numeric
-            for c in num_cols_fga + num_cols_fg:
-                if c in df_shooting.columns:
-                    df_shooting[c] = pd.to_numeric(df_shooting[c], errors="coerce").fillna(0.0)
-
-            # All 2pt / 3pt FGA% for Shot Diet
+            # Aggregate FGA% columns
             df_shooting["FGA% All 2 PT Attempts"] = (
                 df_shooting["FGA% At Rim"]
                 + df_shooting["FGA% In Paint"]
@@ -772,20 +760,18 @@ if team_pdf is not None:
                 + df_shooting["FGA% Corner 3s"]
             )
 
-            # ---------- FG% ZONES VIEW (SAFE SELECTION) ----------
-            fg_zone_cols_desired = [
-                "Jersey",
-                "Player",
+            # FG% columns: make sure they exist and are numeric (NaN→0 later)
+            fg_cols = [
                 "FG% At Rim",
                 "FG% In Paint",
                 "FG% Midrange 2s",
                 "FG% Above Break 3s",
                 "FG% Corner 3s",
             ]
-            # intersect with actual columns just in case
-            fg_zone_cols = [c for c in fg_zone_cols_desired if c in df_shooting.columns]
-
-            df_fg_zones = df_shooting[fg_zone_cols].copy()
+            for c in fg_cols:
+                if c not in df_shooting.columns:
+                    df_shooting[c] = float("nan")
+                df_shooting[c] = pd.to_numeric(df_shooting[c], errors="coerce")
 
             # ================================================================
             #                      SHOT DIET PREVIEW
@@ -803,9 +789,23 @@ if team_pdf is not None:
                 "FGA% Corner 3s",
                 "FGA% All 3 PT Attempts",
             ]
-            # only show columns that actually exist
-            preview_cols_existing = [c for c in preview_cols if c in df_shooting.columns]
-            st.dataframe(df_shooting[preview_cols_existing], use_container_width=True)
+            st.dataframe(df_shooting[preview_cols], use_container_width=True)
+
+            # ================================================================
+            #                      FG% PREVIEW (SAME TABLE)
+            # ================================================================
+            st.markdown("### **FG% Table Preview (From Shot Zone FG%)**")
+
+            fg_preview_cols = [
+                "Jersey",
+                "Player",
+                "FG% At Rim",
+                "FG% In Paint",
+                "FG% Midrange 2s",
+                "FG% Above Break 3s",
+                "FG% Corner 3s",
+            ]
+            st.dataframe(df_shooting[fg_preview_cols], use_container_width=True)
 
             # ================================================================
             #          REQUIRE OVERVIEW CSV (WITH FGA) FOR MAKES/ATTEMPTS
@@ -815,6 +815,7 @@ if team_pdf is not None:
                     "❗ Upload a CBB Overview CSV (with an 'fga' column) to generate the FG% DOCX with makes/attempts."
                 )
             else:
+                # Load overview with FGA
                 overview_file.seek(0)
                 try:
                     df_overview_all = load_and_clean_overview_csv(overview_file)
@@ -829,39 +830,8 @@ if team_pdf is not None:
                 else:
                     df_fga = df_overview_all[["Jersey", "Player", "fga"]].copy()
 
-                    # Merge: FG% by zone + FGA% by zone + FGA total
-                    df_fg = df_fg_zones.merge(
-                        df_shooting[
-                            [
-                                "Jersey",
-                                "Player",
-                                "FGA% At Rim",
-                                "FGA% In Paint",
-                                "FGA% Midrange 2s",
-                                "FGA% Above Break 3s",
-                                "FGA% Corner 3s",
-                            ]
-                        ],
-                        on=["Jersey", "Player"],
-                        how="left",
-                    )
-                    df_fg = df_fg.merge(df_fga, on=["Jersey", "Player"], how="left")
-
-                    # ============================================================
-                    #                         FG% PREVIEW
-                    # ============================================================
-                    st.markdown("### **FG% Table Preview (From Shot Zone FG%)**")
-                    fg_preview_cols = [
-                        "Jersey",
-                        "Player",
-                        "FG% At Rim",
-                        "FG% In Paint",
-                        "FG% Midrange 2s",
-                        "FG% Above Break 3s",
-                        "FG% Corner 3s",
-                    ]
-                    fg_preview_cols_existing = [c for c in fg_preview_cols if c in df_fg.columns]
-                    st.dataframe(df_fg[fg_preview_cols_existing], use_container_width=True)
+                    # Merge: FGA% + FG% by zone + total FGA
+                    df_fg = df_shooting.merge(df_fga, on=["Jersey", "Player"], how="left")
 
                     # ============================================================
                     #          COMPUTE ZONE MAKES / ATTEMPTS USING FGA
@@ -874,6 +844,7 @@ if team_pdf is not None:
                         ("Corner 3s",      "FGA% Corner 3s",      "FG% Corner 3s"),
                     ]
 
+                    # Initialize columns
                     for zone_name, _, _ in zone_defs:
                         df_fg[f"{zone_name} Attempts"] = 0
                         df_fg[f"{zone_name} Makes"] = 0
@@ -882,16 +853,15 @@ if team_pdf is not None:
                     for idx, row in df_fg.iterrows():
                         total_fga = row.get("fga", 0)
                         if pd.isna(total_fga) or total_fga <= 0:
+                            # Leave as 0 attempts / 0 makes / 0% FG
                             continue
 
                         for zone_name, fga_pct_col, fg_pct_col in zone_defs:
-                            if fga_pct_col not in df_fg.columns or fg_pct_col not in df_fg.columns:
-                                continue
-
                             fga_pct = row.get(fga_pct_col)
                             fg_pct = row.get(fg_pct_col)
 
                             if pd.isna(fga_pct) or pd.isna(fg_pct):
+                                # keep 0/0 0%
                                 continue
 
                             zone_attempts = round(total_fga * (fga_pct / 100.0))
@@ -908,6 +878,7 @@ if team_pdf is not None:
                     # ============================================================
                     #      TOTAL 2PT & 3PT MAKES / ATTEMPTS / FG% PER PLAYER
                     # ============================================================
+                    # 2pt zones: At Rim, In Paint, Midrange 2s
                     df_fg["Total 2pt Attempts"] = (
                         df_fg["At Rim Attempts"]
                         + df_fg["In Paint Attempts"]
@@ -926,6 +897,7 @@ if team_pdf is not None:
                         / df_fg.loc[mask_2, "Total 2pt Attempts"]
                     )
 
+                    # 3pt zones: Above Break 3s, Corner 3s
                     df_fg["Total 3pt Attempts"] = (
                         df_fg["Above Break 3s Attempts"]
                         + df_fg["Corner 3s Attempts"]
@@ -1059,6 +1031,7 @@ if team_pdf is not None:
                     title_p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     title_p2.paragraph_format.space_after = Pt(4)
 
+                    # LEFT COLUMN = 2PT STUFF (including total 2pt)
                     fg_left_sections = [
                         ("FG% - At the Rim",       "At Rim FG",       "At Rim Makes",       "At Rim Attempts"),
                         ("FG% - Paint 2s",         "In Paint FG",     "In Paint Makes",     "In Paint Attempts"),
@@ -1066,6 +1039,7 @@ if team_pdf is not None:
                         ("FG% - All 2pt Attempts", "Total 2pt FG",    "Total 2pt Makes",    "Total 2pt Attempts"),
                     ]
 
+                    # RIGHT COLUMN = 3PT STUFF (including total 3pt)
                     fg_right_sections = [
                         ("FG% – Above-the Break 3s", "Above Break 3s FG", "Above Break 3s Makes", "Above Break 3s Attempts"),
                         ("FG% – Corner 3s",          "Corner 3s FG",      "Corner 3s Makes",      "Corner 3s Attempts"),
@@ -1083,9 +1057,10 @@ if team_pdf is not None:
                         left_cell = table.rows[0].cells[0]
                         right_cell = table.rows[0].cells[1]
 
-                        # LEFT (2pt)
+                        # ---------- LEFT SIDE (2PT) ----------
                         if left_sec is not None:
                             title, fg_col, make_col, att_col = left_sec
+
                             p = left_cell.add_paragraph()
                             r = p.add_run(title)
                             r.bold = True
@@ -1100,6 +1075,7 @@ if team_pdf is not None:
                                     makes = int(row_fg.get(make_col, 0) or 0)
                                     attempts = int(row_fg.get(att_col, 0) or 0)
 
+                                    # If missing or zero attempts → show 0.0% (0/0)
                                     if pd.isna(raw_val) or attempts == 0:
                                         val_display = 0.0
                                     else:
@@ -1110,9 +1086,10 @@ if team_pdf is not None:
                                     line = f"{rank}. #{jersey} {name} – {val_display:.1f}% ({makes}/{attempts})"
                                     left_cell.add_paragraph(line)
 
-                        # RIGHT (3pt)
+                        # ---------- RIGHT SIDE (3PT) ----------
                         if right_sec is not None:
                             title, fg_col, make_col, att_col = right_sec
+
                             p = right_cell.add_paragraph()
                             r = p.add_run(title)
                             r.bold = True
@@ -1127,6 +1104,7 @@ if team_pdf is not None:
                                     makes = int(row_fg.get(make_col, 0) or 0)
                                     attempts = int(row_fg.get(att_col, 0) or 0)
 
+                                    # If missing or zero attempts → show 0.0% (0/0)
                                     if pd.isna(raw_val) or attempts == 0:
                                         val_display = 0.0
                                     else:
