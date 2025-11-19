@@ -1426,7 +1426,9 @@ if team_pdf is not None:
                                     val_str = f"{row_s[col]:.1f}%"
                                     jersey = str(row_s["Jersey"]).strip()
                                     name = str(row_s["Player"])
-                                    left_cell.add_paragraph(f"{rank}. #{jersey} {name} – {val_str}")
+                                    left_cell.add_paragraph(
+                                        f"{rank}. #{jersey} {name} – {val_str}"
+                                    )
 
                         # RIGHT side
                         if i < len(right_zone_categories):
@@ -1445,7 +1447,16 @@ if team_pdf is not None:
                                     val_str = f"{row_s[col]:.1f}%"
                                     jersey = str(row_s["Jersey"]).strip()
                                     name = str(row_s["Player"])
-                                    right_cell.add_paragraph(f"{rank}. #{jersey} {name} – {val_str}")
+                                    right_cell.add_paragraph(
+                                        f"{rank}. #{jersey} {name} – {val_str}"
+                                    )
+
+                    # Force zero spacing for every paragraph inside the table
+                    for row in shot_table.rows:
+                        for cell in row.cells:
+                            for para in cell.paragraphs:
+                                para.paragraph_format.space_before = Pt(0)
+                                para.paragraph_format.space_after = Pt(0)
 
                     shooting_buffer = BytesIO()
                     shooting_doc.save(shooting_buffer)
@@ -1460,7 +1471,7 @@ if team_pdf is not None:
                     )
 
                     # ========================================================
-                    #                BUILD 2-COLUMN FG% DOCX (CONDENSED)
+                    #                BUILD 2-COLUMN FG% DOCX  (CONDENSED)
                     # ========================================================
                     fg_doc = Document()
                     fg_style = fg_doc.styles["Normal"]
@@ -1499,6 +1510,7 @@ if team_pdf is not None:
 
                     # ONE table for all FG% sections
                     fg_table = fg_doc.add_table(rows=max_len_fg, cols=2)
+                    fg_table.autofit = True
                     remove_table_borders(fg_table)
 
                     for i in range(max_len_fg):
@@ -1560,6 +1572,13 @@ if team_pdf is not None:
                                     name = str(row_fg["Player"])
                                     line = f"{rank}. #{jersey} {name} – {val_display:.1f}% ({makes}/{attempts})"
                                     right_cell.add_paragraph(line)
+
+                    # Force zero spacing for every paragraph inside the FG% table
+                    for row in fg_table.rows:
+                        for cell in row.cells:
+                            for para in cell.paragraphs:
+                                para.paragraph_format.space_before = Pt(0)
+                                para.paragraph_format.space_after = Pt(0)
 
                     fg_buffer = BytesIO()
                     fg_doc.save(fg_buffer)
