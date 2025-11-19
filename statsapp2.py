@@ -13,12 +13,14 @@ import re
 # ---------------- Streamlit page config ----------------
 
 st.set_page_config(page_title="College Basketball Stats Organizer", layout="wide")
-st.title("KenPom Stats & CBBAnalytics Overview Stats Organizer")
+st.title("KenPom & CBBAnalytics Stats Organizer")
 st.write(
     "Copy the **advanced stats table directly from KenPom**, paste the raw text below, "
     "and the app will parse it into clean advanced stats.\n\n"
-    "Optional: upload a **CBB Overview CSV** (tsPct, fg2Pct, fg3Pct, usagePct, pfP40, pfEff, etc.) "
-    "to generate a matching OVERVIEW DOCX.\n\n"
+    "Upload a **CBB Player Stats CSV** "
+    "to generate a OVERVIEW DOCX.\n\n"
+    "Upload a **CBB Player Profiles PDF**"
+    "to generate a Shot Diet and FG% DOCX.\n\n"
     "The app sorts each category, adds ranks, colors titles and headers with your logo color, "
     "and exports Word docs in a two-column format.\n\n"
     "**Team name and team logo are required before generating any DOCX.**"
@@ -1576,6 +1578,6 @@ else:
 
 
 st.markdown(
-    "<p style='text-align: center; font-size: 12px; color: gray;'>©Ari Jacobs 2025</p>",
+    "<p style='text-align: center; font-size: 22px; color: gray;'>©Ari Jacobs 2025</p>",
     unsafe_allow_html=True,
 )
