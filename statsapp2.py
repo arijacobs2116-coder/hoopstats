@@ -683,7 +683,7 @@ st.markdown("---")  # Divider between sections
 st.markdown("### Overview Stats Input (CBB)")
 
 overview_file = st.file_uploader(
-    "Upload a CBB Overview CSV (tsPct, fg2Pct, fg3Pct, usagePct, pfP40, pfEff, etc., with an 'fga' column)",
+    "Upload a CBB Overview CSV (TS%, 3P%, FGA/40, FT%, 2P%, 3PAr, AST%, USG%, AST/USG, AST/TOV, FTAr, TOV%, ORB%, DRB%, STL%, PF/40, BLK%, PF Eff, FGA)",
     type=["csv"],
     help="This will be used to generate the Overview DOCX and to compute FG% makes/attempts.",
 )
@@ -707,6 +707,163 @@ st.markdown(
 )
 
 st.markdown("---")
+
+# ---------- OVERVIEW PIPELINE ----------
+
+if overview_file is not None:
+    if title_text == "":
+        st.error("❗ Please enter a team name before generating the Overview DOCX.")
+    elif logo_bytes is None:
+        st.error("❗ Please upload a team logo before generating the Overview DOCX.")
+    else:
+        try:
+            overview_file.seek(0)
+            df_overview = load_and_clean_overview_csv(overview_file)
+        except Exception as e:
+            st.error(f"Error reading overview CSV: {e}")
+            st.stop()
+
+        st.subheader("Parsed Overview Table")
+        st.dataframe(df_overview, use_container_width=True)
+
+        left_overview = [
+            ("tsPct", "True Shooting %"),
+            ("fgaP40", "Field Goal Attempts per 40 (FGA/40)"),
+            ("fg2Pct", "Two-Point %"),
+            ("astPct", "Assist %"),
+            ("astTov", "Assist-to-Turnover"),
+            ("tovPct", "Turnover %"),
+            ("astUsage", "Assist/Usage"),
+            ("drbPct", "Defensive Rebound %"),
+            ("blkPct", "Block %"),
+        ]
+
+        right_overview = [
+            ("fg3Pct", "Three-Point %"),
+            ("ftPct", "Free Throw %"),
+            ("fga3Rate", "Three-Point Attempt Rate"),
+            ("usagePct", "Usage %"),
+            ("ftaRate", "Free Throw Attempt Rate"),
+            ("orbPct", "Offensive Rebound %"),
+            ("stlPct", "Steal %"),
+            ("pfP40", "Personal Fouls per 40"),
+            ("pfEff", "PF Efficiency"),
+        ]
+
+        overview_pairs = []
+        max_len = max(len(left_overview), len(right_overview))
+        for i in range(max_len):
+            left = left_overview[i] if i < len(left_overview) else None
+            right = right_overview[i] if i < len(right_overview) else None
+            overview_pairs.append((left, right))
+
+        overview_doc = Document()
+        style = overview_doc.styles["Normal"]
+        font = style.font
+        font.name = "Calibri"
+        font.size = Pt(11)
+
+        if logo_bytes:
+            logo_stream = BytesIO(logo_bytes)
+            overview_doc.add_picture(logo_stream, width=Inches(1.2))
+            last_paragraph = overview_doc.paragraphs[-1]
+            last_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        title_paragraph = overview_doc.add_paragraph()
+        run = title_paragraph.add_run(f"{title_text} OVERVIEW STATISTICS")
+        run.bold = True
+        run.font.size = Pt(14)
+        if header_color is not None:
+            run.font.color.rgb = header_color
+        title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        title_paragraph.paragraph_format.space_after = Pt(4)
+
+        for left_cat, right_cat in overview_pairs:
+            table = overview_doc.add_table(rows=1, cols=2)
+            table.autofit = True
+            remove_table_borders(table)
+
+            left_cell = table.rows[0].cells[0]
+            right_cell = table.rows[0].cells[1]
+
+            # LEFT
+            if left_cat is not None:
+                col, title = left_cat
+                p = left_cell.add_paragraph()
+                r = p.add_run(title)
+                r.bold = True
+                r.font.size = Pt(16)
+                if header_color is not None:
+                    r.font.color.rgb = header_color
+                p.paragraph_format.space_before = Pt(0)
+                p.paragraph_format.space_after = Pt(0)
+                p.paragraph_format.line_spacing = Pt(11)
+
+                if col in df_overview.columns:
+                    df_sorted = df_overview.sort_values(by=col, ascending=False)
+                    for rank, (_, row) in enumerate(df_sorted.iterrows(), start=1):
+                        value = row[col]
+                        if pd.isna(value):
+                            continue
+                        jersey = clean_jersey(row["Jersey"])
+                        name = str(row["Player"])
+                        val_str = format_overview_value(col, value)
+
+                        pl = left_cell.add_paragraph()
+                        pr = pl.add_run(f"{rank}. #{jersey} {name} – {val_str}")
+                        pr.font.size = Pt(11)
+                        pl.paragraph_format.space_before = Pt(0)
+                        pl.paragraph_format.space_after = Pt(0)
+                        pl.paragraph_format.line_spacing = Pt(11)
+
+            # RIGHT
+            if right_cat is not None:
+                col, title = right_cat
+                p = right_cell.add_paragraph()
+                r = p.add_run(title)
+                r.bold = True
+                r.font.size = Pt(16)
+                if header_color is not None:
+                    r.font.color.rgb = header_color
+                p.paragraph_format.space_before = Pt(0)
+                p.paragraph_format.space_after = Pt(0)
+                p.paragraph_format.line_spacing = Pt(11)
+
+                if col in df_overview.columns:
+                    df_sorted = df_overview.sort_values(by=col, ascending=False)
+                    for rank, (_, row) in enumerate(df_sorted.iterrows(), start=1):
+                        value = row[col]
+                        if pd.isna(value):
+                            continue
+                        jersey = clean_jersey(row["Jersey"])
+                        name = str(row["Player"])
+                        val_str = format_overview_value(col, value)
+
+                        pl = right_cell.add_paragraph()
+                        pr = pl.add_run(f"{rank}. #{jersey} {name} – {val_str}")
+                        pr.font.size = Pt(11)
+                        pl.paragraph_format.space_before = Pt(0)
+                        pl.paragraph_format.space_after = Pt(0)
+                        pl.paragraph_format.line_spacing = Pt(11)
+
+            sp = overview_doc.add_paragraph()
+            sp.paragraph_format.space_before = Pt(0)
+            sp.paragraph_format.space_after = Pt(0)
+            sp.paragraph_format.line_spacing = Pt(0.25)
+
+        overview_buffer = BytesIO()
+        overview_doc.save(overview_buffer)
+        overview_buffer.seek(0)
+
+        overview_filename = f"{safe_team_name}_overview_statistics.docx"
+
+        st.download_button(
+            label="Download Overview DOCX",
+            data=overview_buffer,
+            file_name=overview_filename,
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            key="download_overview",
+        )
 
 # =========================================================
 #  CBB Analytics – Shooting by Region (Team PDF)
@@ -1416,162 +1573,7 @@ else:
     st.info("⬆️ Paste KenPom text above or upload an **Advanced Stats** CSV to generate the Advanced Stats DOCX (after entering team name and logo).")
 
 
-# ---------- OVERVIEW PIPELINE ----------
 
-if overview_file is not None:
-    if title_text == "":
-        st.error("❗ Please enter a team name before generating the Overview DOCX.")
-    elif logo_bytes is None:
-        st.error("❗ Please upload a team logo before generating the Overview DOCX.")
-    else:
-        try:
-            overview_file.seek(0)
-            df_overview = load_and_clean_overview_csv(overview_file)
-        except Exception as e:
-            st.error(f"Error reading overview CSV: {e}")
-            st.stop()
-
-        st.subheader("Parsed Overview Table")
-        st.dataframe(df_overview, use_container_width=True)
-
-        left_overview = [
-            ("tsPct", "True Shooting %"),
-            ("fgaP40", "Field Goal Attempts per 40 (FGA/40)"),
-            ("fg2Pct", "Two-Point %"),
-            ("astPct", "Assist %"),
-            ("astTov", "Assist-to-Turnover"),
-            ("tovPct", "Turnover %"),
-            ("astUsage", "Assist/Usage"),
-            ("drbPct", "Defensive Rebound %"),
-            ("blkPct", "Block %"),
-        ]
-
-        right_overview = [
-            ("fg3Pct", "Three-Point %"),
-            ("ftPct", "Free Throw %"),
-            ("fga3Rate", "Three-Point Attempt Rate"),
-            ("usagePct", "Usage %"),
-            ("ftaRate", "Free Throw Attempt Rate"),
-            ("orbPct", "Offensive Rebound %"),
-            ("stlPct", "Steal %"),
-            ("pfP40", "Personal Fouls per 40"),
-            ("pfEff", "PF Efficiency"),
-        ]
-
-        overview_pairs = []
-        max_len = max(len(left_overview), len(right_overview))
-        for i in range(max_len):
-            left = left_overview[i] if i < len(left_overview) else None
-            right = right_overview[i] if i < len(right_overview) else None
-            overview_pairs.append((left, right))
-
-        overview_doc = Document()
-        style = overview_doc.styles["Normal"]
-        font = style.font
-        font.name = "Calibri"
-        font.size = Pt(11)
-
-        if logo_bytes:
-            logo_stream = BytesIO(logo_bytes)
-            overview_doc.add_picture(logo_stream, width=Inches(1.2))
-            last_paragraph = overview_doc.paragraphs[-1]
-            last_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-        title_paragraph = overview_doc.add_paragraph()
-        run = title_paragraph.add_run(f"{title_text} OVERVIEW STATISTICS")
-        run.bold = True
-        run.font.size = Pt(14)
-        if header_color is not None:
-            run.font.color.rgb = header_color
-        title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        title_paragraph.paragraph_format.space_after = Pt(4)
-
-        for left_cat, right_cat in overview_pairs:
-            table = overview_doc.add_table(rows=1, cols=2)
-            table.autofit = True
-            remove_table_borders(table)
-
-            left_cell = table.rows[0].cells[0]
-            right_cell = table.rows[0].cells[1]
-
-            # LEFT
-            if left_cat is not None:
-                col, title = left_cat
-                p = left_cell.add_paragraph()
-                r = p.add_run(title)
-                r.bold = True
-                r.font.size = Pt(16)
-                if header_color is not None:
-                    r.font.color.rgb = header_color
-                p.paragraph_format.space_before = Pt(0)
-                p.paragraph_format.space_after = Pt(0)
-                p.paragraph_format.line_spacing = Pt(11)
-
-                if col in df_overview.columns:
-                    df_sorted = df_overview.sort_values(by=col, ascending=False)
-                    for rank, (_, row) in enumerate(df_sorted.iterrows(), start=1):
-                        value = row[col]
-                        if pd.isna(value):
-                            continue
-                        jersey = clean_jersey(row["Jersey"])
-                        name = str(row["Player"])
-                        val_str = format_overview_value(col, value)
-
-                        pl = left_cell.add_paragraph()
-                        pr = pl.add_run(f"{rank}. #{jersey} {name} – {val_str}")
-                        pr.font.size = Pt(11)
-                        pl.paragraph_format.space_before = Pt(0)
-                        pl.paragraph_format.space_after = Pt(0)
-                        pl.paragraph_format.line_spacing = Pt(11)
-
-            # RIGHT
-            if right_cat is not None:
-                col, title = right_cat
-                p = right_cell.add_paragraph()
-                r = p.add_run(title)
-                r.bold = True
-                r.font.size = Pt(16)
-                if header_color is not None:
-                    r.font.color.rgb = header_color
-                p.paragraph_format.space_before = Pt(0)
-                p.paragraph_format.space_after = Pt(0)
-                p.paragraph_format.line_spacing = Pt(11)
-
-                if col in df_overview.columns:
-                    df_sorted = df_overview.sort_values(by=col, ascending=False)
-                    for rank, (_, row) in enumerate(df_sorted.iterrows(), start=1):
-                        value = row[col]
-                        if pd.isna(value):
-                            continue
-                        jersey = clean_jersey(row["Jersey"])
-                        name = str(row["Player"])
-                        val_str = format_overview_value(col, value)
-
-                        pl = right_cell.add_paragraph()
-                        pr = pl.add_run(f"{rank}. #{jersey} {name} – {val_str}")
-                        pr.font.size = Pt(11)
-                        pl.paragraph_format.space_before = Pt(0)
-                        pl.paragraph_format.space_after = Pt(0)
-                        pl.paragraph_format.line_spacing = Pt(11)
-
-            sp = overview_doc.add_paragraph()
-            sp.paragraph_format.space_before = Pt(0)
-            sp.paragraph_format.space_after = Pt(0)
-            sp.paragraph_format.line_spacing = Pt(0.25)
-
-        overview_buffer = BytesIO()
-        overview_doc.save(overview_buffer)
-        overview_buffer.seek(0)
-
-        overview_filename = f"{safe_team_name}_overview_statistics.docx"
-
-        st.download_button(
-            label="Download Overview DOCX",
-            data=overview_buffer,
-            file_name=overview_filename,
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            key="download_overview",
-        )
 
 st.markdown(
     "<p style='text-align: center; font-size: 12px; color: gray;'>©Ari Jacobs 2025</p>",
