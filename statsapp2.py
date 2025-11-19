@@ -338,56 +338,53 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
 
 def load_and_clean_overview_csv(uploaded_file):
     """
-    Loads a CBB Analytics-style overview CSV and returns:
-      Jersey, Player, and the overview stats used in the layout.
-    Includes 'fga' (total FGA) for FG% makes/attempts logic.
+    Load the CBB Overview CSV and fix percentage-like columns that are stored
+    as fractions (e.g. 0.06 for 6%).
     """
     df = pd.read_csv(uploaded_file)
 
-    # Standardize to our naming
-    df = df.rename(
-        columns={
-            "fullName": "Player",
-            "jerseyNum": "Jersey",
-        }
-    )
+    # Strip whitespace from column names
+    df.columns = [c.strip() for c in df.columns]
 
-    df["Jersey"] = df["Jersey"].apply(clean_jersey)
-    df["Player"] = df["Player"].astype(str).str.strip()
-
-    needed_cols = [
-        "Jersey",
-        "Player",
-        "tsPct",
-        "fgaP40",
-        "fg2Pct",
-        "astPct",
-        "astTov",
-        "tovPct",
-        "astUsage",
-        "drbPct",
-        "blkPct",
-        "fg3Pct",
-        "ftPct",
-        "fga3Rate",
-        "usagePct",
-        "ftaRate",
-        "orbPct",
-        "stlPct",
-        "pfP40",
-        "pfEff",
-        "fga",  # total FGA for season
-    ]
-
-    cols_present = [c for c in needed_cols if c in df.columns]
-    df = df[cols_present].copy()
-
+    # --- Convert all non-name columns to numeric where possible ---
     for col in df.columns:
-        if col in ["Jersey", "Player"]:
+        if col.lower() in ["player", "jersey"]:
             continue
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
+    # --- Fix percentage-like columns stored as 0–1 fractions ---
+    # We only touch columns whose name suggests "percentage/rate/share"
+    # AND whose values are between 0 and ~1.5.
+    for col in df.columns:
+        col_lower = col.lower()
+        if col_lower in ["player", "jersey"]:
+            continue
+
+        if not any(tag in col_lower for tag in ["pct", "%", "rate", "share"]):
+            # not obviously a percent/rate column, skip
+            continue
+
+        s = pd.to_numeric(df[col], errors="coerce")
+        if s.notna().sum() == 0:
+            continue
+
+        col_min = s.min()
+        col_max = s.max()
+
+        # If everything is between 0 and 1.5, it's almost certainly stored as a fraction
+        if (
+            pd.notna(col_min)
+            and pd.notna(col_max)
+            and 0.0 <= col_min
+            and col_max <= 1.5
+        ):
+            # e.g. 0.06 -> 6.0  (6%)
+            df[col] = s * 100.0
+        else:
+            df[col] = s
+
     return df
+
 
 
 def remove_table_borders(table):
