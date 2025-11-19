@@ -19,7 +19,7 @@ st.write(
     "and the app will parse it into clean advanced stats.\n\n"
     "Upload a **CBB Player Stats CSV** "
     "to generate a OVERVIEW DOCX.\n\n"
-    "Upload a **CBB Player Profiles PDF**"
+    "Upload a **CBB Player Profiles PDF** "
     "to generate a Shot Diet and FG% DOCX.\n\n"
     "The app sorts each category, adds ranks, colors titles and headers with your logo color, "
     "and exports Word docs in a two-column format.\n\n"
