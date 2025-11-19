@@ -1571,8 +1571,8 @@ if df_stats is not None:
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             key="download_advanced",
         )
-else:
-    st.info("⬆️ Paste KenPom text above or upload an **Advanced Stats** CSV to generate the Advanced Stats DOCX (after entering team name and logo).")
+
+    
 
 
 
