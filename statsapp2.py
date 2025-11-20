@@ -338,52 +338,56 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
 
 def load_and_clean_overview_csv(uploaded_file):
     """
-    Load the CBB Overview CSV and fix percentage-like columns that are stored
-    as fractions (e.g. 0.06 for 6%). Also explicitly handles Assist% and Block%.
+    Loads a CBB Analytics-style overview CSV and returns:
+      Jersey, Player, and the overview stats used in the layout.
+    Includes 'fga' (total FGA) for FG% makes/attempts logic.
     """
     df = pd.read_csv(uploaded_file)
 
-    # Strip whitespace from column names
-    df.columns = [c.strip() for c in df.columns]
+    # Standardize to our naming
+    df = df.rename(
+        columns={
+            "fullName": "Player",
+            "jerseyNum": "Jersey",
+        }
+    )
 
-    # Convert all non-name columns to numeric where possible
+    df["Jersey"] = df["Jersey"].apply(clean_jersey)
+    df["Player"] = df["Player"].astype(str).str.strip()
+
+    needed_cols = [
+        "Jersey",
+        "Player",
+        "tsPct",
+        "fgaP40",
+        "fg2Pct",
+        "astPct",
+        "astTov",
+        "tovPct",
+        "astUsage",
+        "drbPct",
+        "blkPct",
+        "fg3Pct",
+        "ftPct",
+        "fga3Rate",
+        "usagePct",
+        "ftaRate",
+        "orbPct",
+        "stlPct",
+        "pfP40",
+        "pfEff",
+        "fga",  # total FGA for season
+    ]
+
+    cols_present = [c for c in needed_cols if c in df.columns]
+    df = df[cols_present].copy()
+
     for col in df.columns:
-        if col.lower() in ["player", "jersey"]:
+        if col in ["Jersey", "Player"]:
             continue
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    for col in df.columns:
-        col_lower = col.lower()
-        if col_lower in ["player", "jersey"]:
-            continue
-
-        # treat these as "percent-like" columns
-        is_percent_like = any(
-            tag in col_lower
-            for tag in ["pct", "%", "rate", "share", "ast", "assist", "blk", "block"]
-        )
-
-        if not is_percent_like:
-            continue
-
-        s = pd.to_numeric(df[col], errors="coerce")
-        s_non = s.dropna()
-        if s_non.empty:
-            continue
-
-        col_min = s_non.min()
-        col_max = s_non.max()
-
-        # If values live in [0, 1.5], assume they are fractions and scale to 0–100
-        # This catches things like 0.06 (6%), 0.3 (30%), 0.01 (1%), etc.
-        if 0.0 <= col_min and col_max <= 1.5:
-            df[col] = s * 100.0
-        else:
-            df[col] = s
-
     return df
-
-
 
 
 def remove_table_borders(table):
@@ -1283,17 +1287,6 @@ if team_pdf is not None:
                     )
                     df_fg = df_fg.merge(df_fga, on=["Jersey", "Player"], how="left")
 
-                    # ---------- SAFETY: ensure Player column exists ----------
-                    if "Player" not in df_fg.columns and "Player" in df_fg_zones.columns:
-                        df_fg = df_fg.merge(
-                            df_fg_zones[["Jersey", "Player"]],
-                            on="Jersey",
-                            how="left",
-                            suffixes=("", "_zones"),
-                        )
-                        if "Player_zones" in df_fg.columns and "Player" not in df_fg.columns:
-                            df_fg.rename(columns={"Player_zones": "Player"}, inplace=True)
-
                     # ========================================================
                     #          COMPUTE ZONE MAKES / ATTEMPTS USING FGA
                     # ========================================================
@@ -1429,10 +1422,10 @@ if team_pdf is not None:
 
                             if col in df_shooting.columns:
                                 df_sorted = df_shooting.sort_values(by=col, ascending=False)
-                                for rank, (_, row_s) in enumerate(df_shooting.iterrows(), start=1):
+                                for rank, (_, row_s) in enumerate(df_sorted.iterrows(), start=1):
                                     val_str = f"{row_s[col]:.1f}%"
-                                    jersey = str(row_s.get("Jersey", "")).strip()
-                                    name = str(row_s.get("Player", "")).strip()
+                                    jersey = str(row_s["Jersey"]).strip()
+                                    name = str(row_s["Player"])
                                     left_cell.add_paragraph(
                                         f"{rank}. #{jersey} {name} – {val_str}"
                                     )
@@ -1450,10 +1443,10 @@ if team_pdf is not None:
 
                             if col in df_shooting.columns:
                                 df_sorted = df_shooting.sort_values(by=col, ascending=False)
-                                for rank, (_, row_s) in enumerate(df_shooting.iterrows(), start=1):
+                                for rank, (_, row_s) in enumerate(df_sorted.iterrows(), start=1):
                                     val_str = f"{row_s[col]:.1f}%"
-                                    jersey = str(row_s.get("Jersey", "")).strip()
-                                    name = str(row_s.get("Player", "")).strip()
+                                    jersey = str(row_s["Jersey"]).strip()
+                                    name = str(row_s["Player"])
                                     right_cell.add_paragraph(
                                         f"{rank}. #{jersey} {name} – {val_str}"
                                     )
@@ -1547,8 +1540,8 @@ if team_pdf is not None:
                                     else:
                                         val_display = float(raw_val)
 
-                                    jersey = str(row_fg.get("Jersey", "")).strip()
-                                    name = str(row_fg.get("Player", "")).strip()
+                                    jersey = str(row_fg["Jersey"]).strip()
+                                    name = str(row_fg["Player"])
                                     line = f"{rank}. #{jersey} {name} – {val_display:.1f}% ({makes}/{attempts})"
                                     left_cell.add_paragraph(line)
 
@@ -1575,8 +1568,8 @@ if team_pdf is not None:
                                     else:
                                         val_display = float(raw_val)
 
-                                    jersey = str(row_fg.get("Jersey", "")).strip()
-                                    name = str(row_fg.get("Player", "")).strip()
+                                    jersey = str(row_fg["Jersey"]).strip()
+                                    name = str(row_fg["Player"])
                                     line = f"{rank}. #{jersey} {name} – {val_display:.1f}% ({makes}/{attempts})"
                                     right_cell.add_paragraph(line)
 
