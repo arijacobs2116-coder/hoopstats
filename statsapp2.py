@@ -1283,6 +1283,17 @@ if team_pdf is not None:
                     )
                     df_fg = df_fg.merge(df_fga, on=["Jersey", "Player"], how="left")
 
+                    # ---------- SAFETY: ensure Player column exists ----------
+                    if "Player" not in df_fg.columns and "Player" in df_fg_zones.columns:
+                        df_fg = df_fg.merge(
+                            df_fg_zones[["Jersey", "Player"]],
+                            on="Jersey",
+                            how="left",
+                            suffixes=("", "_zones"),
+                        )
+                        if "Player_zones" in df_fg.columns and "Player" not in df_fg.columns:
+                            df_fg.rename(columns={"Player_zones": "Player"}, inplace=True)
+
                     # ========================================================
                     #          COMPUTE ZONE MAKES / ATTEMPTS USING FGA
                     # ========================================================
@@ -1418,10 +1429,10 @@ if team_pdf is not None:
 
                             if col in df_shooting.columns:
                                 df_sorted = df_shooting.sort_values(by=col, ascending=False)
-                                for rank, (_, row_s) in enumerate(df_sorted.iterrows(), start=1):
+                                for rank, (_, row_s) in enumerate(df_shooting.iterrows(), start=1):
                                     val_str = f"{row_s[col]:.1f}%"
-                                    jersey = str(row_s["Jersey"]).strip()
-                                    name = str(row_s["Player"])
+                                    jersey = str(row_s.get("Jersey", "")).strip()
+                                    name = str(row_s.get("Player", "")).strip()
                                     left_cell.add_paragraph(
                                         f"{rank}. #{jersey} {name} – {val_str}"
                                     )
@@ -1439,10 +1450,10 @@ if team_pdf is not None:
 
                             if col in df_shooting.columns:
                                 df_sorted = df_shooting.sort_values(by=col, ascending=False)
-                                for rank, (_, row_s) in enumerate(df_sorted.iterrows(), start=1):
+                                for rank, (_, row_s) in enumerate(df_shooting.iterrows(), start=1):
                                     val_str = f"{row_s[col]:.1f}%"
-                                    jersey = str(row_s["Jersey"]).strip()
-                                    name = str(row_s["Player"])
+                                    jersey = str(row_s.get("Jersey", "")).strip()
+                                    name = str(row_s.get("Player", "")).strip()
                                     right_cell.add_paragraph(
                                         f"{rank}. #{jersey} {name} – {val_str}"
                                     )
@@ -1536,8 +1547,8 @@ if team_pdf is not None:
                                     else:
                                         val_display = float(raw_val)
 
-                                    jersey = str(row_fg["Jersey"]).strip()
-                                    name = str(row_fg["Player"])
+                                    jersey = str(row_fg.get("Jersey", "")).strip()
+                                    name = str(row_fg.get("Player", "")).strip()
                                     line = f"{rank}. #{jersey} {name} – {val_display:.1f}% ({makes}/{attempts})"
                                     left_cell.add_paragraph(line)
 
@@ -1564,8 +1575,8 @@ if team_pdf is not None:
                                     else:
                                         val_display = float(raw_val)
 
-                                    jersey = str(row_fg["Jersey"]).strip()
-                                    name = str(row_fg["Player"])
+                                    jersey = str(row_fg.get("Jersey", "")).strip()
+                                    name = str(row_fg.get("Player", "")).strip()
                                     line = f"{rank}. #{jersey} {name} – {val_display:.1f}% ({makes}/{attempts})"
                                     right_cell.add_paragraph(line)
 
