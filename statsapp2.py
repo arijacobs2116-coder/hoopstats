@@ -757,12 +757,6 @@ if df_stats is not None:
             # LEFT CATEGORY
             if left_cat is not None:
                 col, title = left_cat
-                df_sorted = (
-                    df_stats.sort_values(by=col, ascending=False)
-                    if col in df_stats.columns
-                    else None
-                )
-
                 p = left_cell.add_paragraph()
                 r = p.add_run(title)
                 r.bold = True
@@ -773,20 +767,28 @@ if df_stats is not None:
                 p.paragraph_format.space_after = Pt(0)
                 p.paragraph_format.line_spacing = Pt(11)
 
-                if df_sorted is not None:
-                    for rank, (_, row) in enumerate(df_sorted.iterrows(), start=1):
+                if col in df_stats.columns:
+                    # copy + add DNQ sort logic
+                    df_cat = df_stats.copy()
+                    df_cat[col] = pd.to_numeric(df_cat[col], errors="coerce")
+                    df_cat["sort_val"] = df_cat[col].fillna(-1e9)
+                    df_cat = df_cat.sort_values("sort_val", ascending=False)
+
+                    for rank, (_, row) in enumerate(df_cat.iterrows(), start=1):
                         value = row[col]
-                        if pd.isna(value):
-                            continue
                         jersey = clean_jersey(row["Jersey"])
                         name = str(row["Player"])
 
-                        if abs(value - int(value)) < 1e-6:
-                            val_str = f"{int(value)}"
+                        if pd.isna(value):
+                            # DNQ player
+                            val_str = "DNQ"
+                            suffix = ""
                         else:
-                            val_str = f"{value:.1f}"
-
-                        suffix = "" if col in ["ORtg", "FC/40", "FD/40"] else "%"
+                            if abs(value - int(value)) < 1e-6:
+                                val_str = f"{int(value)}"
+                            else:
+                                val_str = f"{value:.1f}"
+                            suffix = "" if col in ["ORtg", "FC/40", "FD/40"] else "%"
 
                         pl = left_cell.add_paragraph()
                         pr = pl.add_run(f"{rank}. #{jersey} {name} – {val_str}{suffix}")
@@ -798,12 +800,6 @@ if df_stats is not None:
             # RIGHT CATEGORY
             if right_cat is not None:
                 col, title = right_cat
-                df_sorted = (
-                    df_stats.sort_values(by=col, ascending=False)
-                    if col in df_stats.columns
-                    else None
-                )
-
                 p = right_cell.add_paragraph()
                 r = p.add_run(title)
                 r.bold = True
@@ -814,20 +810,26 @@ if df_stats is not None:
                 p.paragraph_format.space_after = Pt(0)
                 p.paragraph_format.line_spacing = Pt(11)
 
-                if df_sorted is not None:
-                    for rank, (_, row) in enumerate(df_sorted.iterrows(), start=1):
+                if col in df_stats.columns:
+                    df_cat = df_stats.copy()
+                    df_cat[col] = pd.to_numeric(df_cat[col], errors="coerce")
+                    df_cat["sort_val"] = df_cat[col].fillna(-1e9)
+                    df_cat = df_cat.sort_values("sort_val", ascending=False)
+
+                    for rank, (_, row) in enumerate(df_cat.iterrows(), start=1):
                         value = row[col]
-                        if pd.isna(value):
-                            continue
                         jersey = clean_jersey(row["Jersey"])
                         name = str(row["Player"])
 
-                        if abs(value - int(value)) < 1e-6:
-                            val_str = f"{int(value)}"
+                        if pd.isna(value):
+                            val_str = "DNQ"
+                            suffix = ""
                         else:
-                            val_str = f"{value:.1f}"
-
-                        suffix = "" if col in ["ORtg", "FC/40", "FD/40"] else "%"
+                            if abs(value - int(value)) < 1e-6:
+                                val_str = f"{int(value)}"
+                            else:
+                                val_str = f"{value:.1f}"
+                            suffix = "" if col in ["ORtg", "FC/40", "FD/40"] else "%"
 
                         pl = right_cell.add_paragraph()
                         pr = pl.add_run(f"{rank}. #{jersey} {name} – {val_str}{suffix}")
@@ -854,10 +856,6 @@ if df_stats is not None:
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             key="download_advanced",
         )
-
-    
-
-
 
 st.markdown("---")  # Divider between sections
 
