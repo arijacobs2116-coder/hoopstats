@@ -434,8 +434,8 @@ def format_overview_value(col: str, value: float) -> str:
     # Percent-like stats
     percent_cols = [
         "tsPct", "fg2Pct", "fg3Pct", "ftPct",
-        "fga3Rate", "usagePct", "ftaRate","blkPct"
-        "orbPct", "drbPct", "stlPct", "tovPct","astPct"
+        "fga3Rate", "usagePct", "ftaRate",
+        "orbPct", "drbPct", "stlPct", "tovPct","astPct", "blkPct"
     ]
     if col in percent_cols:
         if value < 10:
