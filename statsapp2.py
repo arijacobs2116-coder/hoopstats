@@ -911,6 +911,19 @@ if overview_file is not None:
 
         st.subheader("Parsed Overview Table")
         st.dataframe(df_overview, use_container_width=True)
+        
+        # ---- DNQ CHECK ----
+
+        # Convert blank/whitespace to NaN
+        df_overview = df_overview.replace(r'^\s*$', None, regex=True)
+
+        # If ANY missing values exist → DNQ
+        if df_overview.isnull().values.any():
+            st.warning("⚠️ Overview contains missing data — marked as **DNQ**.")
+            overview_result = "DNQ"
+        else:
+            overview_result = "Qualified"
+
 
         left_overview = [
             ("tsPct", "True Shooting %"),
