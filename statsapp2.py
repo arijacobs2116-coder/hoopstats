@@ -1733,7 +1733,7 @@ else:
 
 
 st.markdown(
-    "<p style='text-align: center; font-size: 22px; color: gray;'>©Ari Jacobs/p>",
+    "<p style='text-align: center; font-size: 22px; color: gray;'>©Ari Jacobs",
     unsafe_allow_html=True,
 )
 
