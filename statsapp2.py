@@ -185,11 +185,11 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
     for ln in lines:
         s = ln.strip()
 
-        # top header row
+        # Top header row
         if s.startswith("Ht") and "Wt" in s and "Yr" in s:
             continue
 
-        # usage category headers
+        # Usage category headers
         if "possessions used" in s.lower():
             continue
 
@@ -380,10 +380,8 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
 
     df = pd.DataFrame(players)
 
-    # If you have a final cleaner to match the CSV schema, keep this:
-    if "_final_clean_kenpom_df" in globals():
-        df = _final_clean_kenpom_df(df)
-
+    # DO NOT pass through _final_clean_kenpom_df here – that was scrambling values.
+    # Just return exactly what we parsed.
     return df
 
 
