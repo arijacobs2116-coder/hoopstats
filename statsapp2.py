@@ -10,8 +10,15 @@ from PIL import Image
 from PyPDF2 import PdfReader
 import re
 
+
+st.markdown(
+    "<p style='text-align: center; font-size: 22px; color: gray;'>©Ari Jacobs 2025</p>",
+    unsafe_allow_html=True,
+)
 def check_password():
     """Return True if the user entered the correct password."""
+
+
 
     def password_entered():
         """Callback run when the user hits enter."""
