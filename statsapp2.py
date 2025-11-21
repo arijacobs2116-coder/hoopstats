@@ -167,11 +167,12 @@ def extract_numbers(line: str):
 def parse_kenpom_paste(raw: str) -> pd.DataFrame:
     """
     Parse raw text copied directly from a KenPom player-usage/advanced page.
-    Handles category headers, 'National Rank' lines, and random line breaks.
+    Handles category headers, 'National Rank' lines, random line breaks,
+    and rank numbers between stats.
     """
     import re
 
-    # -------------- CLEAN LINES --------------
+    # --------- CLEAN LINES (DROP HEADER + CATEGORY TITLES) ---------
     lines = [ln.rstrip() for ln in raw.splitlines()]
     lines = [ln for ln in lines if ln.strip()]
 
@@ -179,11 +180,11 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
     for ln in lines:
         s = ln.strip()
 
-        # Header row
+        # top header row
         if s.startswith("Ht") and "Wt" in s and "Yr" in s:
             continue
 
-        # Category headers
+        # usage category headers
         if "possessions used" in s.lower():
             continue
 
@@ -191,26 +192,26 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
 
     lines = cleaned
 
-    # -------------- FIND PLAYER BLOCKS --------------
-    # Player lines start with jersey number + name: "2 Jahvin Carter"
-    player_starts = []
-    for idx, line in enumerate(lines):
-        if re.match(r"^\s*\d+\s+[A-Za-z]", line):
-            player_starts.append(idx)
+    # --------- FIND PLAYER BLOCK STARTS ---------
+    # A player block starts with: "2 Jahvin Carter", "55 Sean Smith", etc.
+    player_starts = [
+        idx for idx, line in enumerate(lines)
+        if re.match(r"^\s*\d+\s+[A-Za-z]", line)
+    ]
 
     if not player_starts:
-        raise ValueError("Could not find any player lines in pasted KenPom text.")
+        raise ValueError("Could not find any player lines in the pasted KenPom text.")
 
     def parse_player_block(block_lines: list[str]) -> dict | None:
-        # Join lines and split into tokens so we don't care about line breaks
+        # Smash block lines together so we don't care about where line breaks were
         text = " ".join(block_lines)
         tokens = text.split()
         if not tokens:
             return None
 
-        # Remove the 'National Rank' phrase and its tokens
-        i = 0
+        # ---- Remove the literal "National Rank" phrase + its tokens ----
         filtered = []
+        i = 0
         while i < len(tokens):
             if (
                 tokens[i].lower() == "national"
@@ -228,67 +229,55 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
             return None
         jersey = tokens[0]
 
-        # ---------- NAME UP TO HEIGHT ----------
+        # ---- Name runs from after jersey up until the height token (like "6-3") ----
         name_tokens = []
         height_idx = None
         for i in range(1, len(tokens)):
-            t = tokens[i]
-            if re.match(r"^\d+-\d+$", t):  # height like 6-3
+            if re.match(r"^\d+-\d+$", tokens[i]):  # height like 6-3, 6-11
                 height_idx = i
                 break
-            name_tokens.append(t)
+            name_tokens.append(tokens[i])
 
         if height_idx is None or not name_tokens:
             return None
 
         name = " ".join(name_tokens)
 
-        # ---------- BASIC INFO ----------
+        # ---- Basic info: height, weight, year, games, starts (optional) ----
         ht = tokens[height_idx]
-        wt = tokens[height_idx + 1] if height_idx + 1 < len(tokens) else ""
-        yr = tokens[height_idx + 2] if height_idx + 2 < len(tokens) else ""
+        wt = tokens[height_idx + 1]
+        yr = tokens[height_idx + 2]
 
         j = height_idx + 3
-        g = tokens[j] if j < len(tokens) else ""
+        g = tokens[j]
         j += 1
 
-        # S (starts) is optional – if the next token has a '.', it's %Min not S
+        # S (starts) is optional – if the next token has a '.', it's actually %Min
         s = ""
         if j < len(tokens) and "." not in tokens[j]:
             s = tokens[j]
             j += 1
 
-        # %Min and ORtg
+        # %Min is always a decimal
         pct_min = float(tokens[j])
         j += 1
-        ortg = float(tokens[j])
-        j += 1
 
-        # ---------- HELPER TO PULL NEXT STAT FLOAT (SKIP RANKS) ----------
-        def next_stat_float(tokens, j):
-            while j < len(tokens):
-                t = tokens[j]
+        # ---- Helper: read next stat, skipping integer rank tokens ----
+        def next_stat(idx: int):
+            # Skip tokens that don't have a '.' → these are ranks
+            while idx < len(tokens) and "." not in tokens[idx]:
+                idx += 1
+            if idx >= len(tokens):
+                return None, idx
+            v = float(tokens[idx])
+            idx += 1
+            return v, idx
 
-                # Reached the shooting splits like "9-12"
-                if re.match(r"^\d+-\d+$", t):
-                    return None, j
+        # ORtg comes next (sometimes there's a rank between %Min and ORtg)
+        ortg, j = next_stat(j)
 
-                try:
-                    v = float(t)
-                except ValueError:
-                    j += 1
-                    continue
-
-                # Skip big integers (likely national ranks)
-                if "." not in t and v >= 100:
-                    j += 1
-                    continue
-
-                return v, j + 1
-
-            return None, j
-
-        stats_order = [
+        # The rest of the advanced stats come in this order:
+        stat_keys = [
             "%Poss",
             "%Shots",
             "eFG%",
@@ -305,31 +294,40 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
         ]
 
         stats = {}
-        for key in stats_order:
-            v, j = next_stat_float(tokens, j)
-            stats[key] = v
+        for key in stat_keys:
+            stats[key], j = next_stat(j)
 
-        # ---------- SHOOTING SPLITS ----------
-        def next_made_att(tokens, j):
-            while j < len(tokens):
-                t = tokens[j]
-                if re.match(r"^\d+-\d+$", t):
-                    made_att = t
-                    pct = None
-                    if j + 1 < len(tokens):
-                        p = tokens[j + 1]
-                        try:
-                            pct = float(p)
-                        except ValueError:
-                            pct = None
-                    return made_att, pct, j + 2
-                # Skip ranks / junk
-                j += 1
-            return None, None, j
+        # ---- Parse shooting splits from the END (FT, 2P, 3P) ----
+        def parse_splits(tokens: list[str]):
+            ftma = ftpct = twoma = twopct = threema = threepct = None
+            idx = len(tokens) - 1
 
-        ftma, ftpct, j = next_made_att(tokens, j)
-        twoma, twopct, j = next_made_att(tokens, j)
-        threema, threepct, j = next_made_att(tokens, j)
+            def prev_pct(k: int):
+                if k < 0:
+                    return None, k
+                try:
+                    v = float(tokens[k])
+                    return v, k - 1
+                except ValueError:
+                    return None, k - 1
+
+            def prev_ma(k: int):
+                while k >= 0:
+                    if re.match(r"^\d+-\d+$", tokens[k]):
+                        return tokens[k], k - 1
+                    k -= 1
+                return None, k
+
+            threepct, idx = prev_pct(idx)
+            threema, idx = prev_ma(idx)
+            twopct, idx = prev_pct(idx)
+            twoma, idx = prev_ma(idx)
+            ftpct, idx = prev_pct(idx)
+            ftma, idx = prev_ma(idx)
+
+            return ftma, ftpct, twoma, twopct, threema, threepct
+
+        ftma, ftpct, twoma, twopct, threema, threepct = parse_splits(tokens)
 
         row = {
             "Jersey": jersey,
@@ -363,7 +361,7 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
         }
         return row
 
-    # -------------- PARSE ALL PLAYERS --------------
+    # --------- Build DataFrame for all players ---------
     players = []
     for idx, start_idx in enumerate(player_starts):
         end_idx = player_starts[idx + 1] if idx + 1 < len(player_starts) else len(lines)
@@ -372,12 +370,12 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
         if row is not None:
             players.append(row)
 
-    if not players:
-        raise ValueError("Could not parse any players from the pasted KenPom text.")
-
     df = pd.DataFrame(players)
-    # your existing cleaner – keeps everything consistent with CSV path
+
+    # If you already have a cleaner used by load_and_clean_kenpom_csv,
+    # keep this line so the schema matches:
     df = _final_clean_kenpom_df(df)
+
     return df
 
 
