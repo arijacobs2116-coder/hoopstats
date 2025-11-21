@@ -12,26 +12,26 @@ import re
 
 
 def check_password():
-    """Return True if the user entered the correct password."""
+    """Returns True if the correct password was entered."""
 
     def password_entered():
-        """Callback run when the user hits enter."""
+        """Checks whether the entered password is correct."""
         if st.session_state["password"] == st.secrets["APP_PASSWORD"]:
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # don't store plaintext
+            del st.session_state["password"]  # remove password from state
         else:
             st.session_state["password_correct"] = False
 
-    # First run: no password entered yet
+    # If no password typed yet:
     if "password_correct" not in st.session_state:
         st.text_input(
             "Enter password",
             type="password",
             key="password",
-            on_change=password_entered,
+            on_change=password_entered
         )
 
-        # Show your footer on the password screen
+        # *** YOUR FOOTER HERE ***
         st.markdown(
             "<p style='text-align: center; font-size: 22px; color: gray;'>©Ari Jacobs 2025</p>",
             unsafe_allow_html=True,
@@ -39,25 +39,24 @@ def check_password():
 
         return False
 
-    # Wrong password
+    # If incorrect password:
     if not st.session_state["password_correct"]:
         st.text_input(
             "Enter password",
             type="password",
             key="password",
-            on_change=password_entered,
+            on_change=password_entered
         )
         st.error("Incorrect password.")
 
-        # Show footer
+        # *** YOUR FOOTER HERE ***
         st.markdown(
-            "<p style='text-align: center; font-size: 22px; color: gray;'>©Ari Jacobs 2025</p>",
+            "<p style='text-align: center; font-size: 22px; color: gray;'>©Ari Jacobs</p>",
             unsafe_allow_html=True,
         )
 
         return False
 
-    # Correct password
     return True
 
 
@@ -1725,6 +1724,7 @@ else:
 
 
 st.markdown(
-    "<p style='text-align: center; font-size: 22px; color: gray;'>©Ari Jacobs 2025</p>",
+    "<p style='text-align: center; font-size: 22px; color: gray;'>©Ari Jacobs/p>",
     unsafe_allow_html=True,
 )
+
