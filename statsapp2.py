@@ -11,24 +11,18 @@ from PyPDF2 import PdfReader
 import re
 
 
-st.markdown(
-    "<p style='text-align: center; font-size: 22px; color: gray;'>©Ari Jacobs 2025</p>",
-    unsafe_allow_html=True,
-)
 def check_password():
     """Return True if the user entered the correct password."""
-
-
 
     def password_entered():
         """Callback run when the user hits enter."""
         if st.session_state["password"] == st.secrets["APP_PASSWORD"]:
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # don't store the password
+            del st.session_state["password"]  # don't store plaintext
         else:
             st.session_state["password_correct"] = False
 
-    # First run: no password yet
+    # First run: no password entered yet
     if "password_correct" not in st.session_state:
         st.text_input(
             "Enter password",
@@ -36,6 +30,13 @@ def check_password():
             key="password",
             on_change=password_entered,
         )
+
+        # Show your footer on the password screen
+        st.markdown(
+            "<p style='text-align: center; font-size: 22px; color: gray;'>©Ari Jacobs 2025</p>",
+            unsafe_allow_html=True,
+        )
+
         return False
 
     # Wrong password
@@ -47,10 +48,18 @@ def check_password():
             on_change=password_entered,
         )
         st.error("Incorrect password.")
+
+        # Show footer
+        st.markdown(
+            "<p style='text-align: center; font-size: 22px; color: gray;'>©Ari Jacobs 2025</p>",
+            unsafe_allow_html=True,
+        )
+
         return False
 
     # Correct password
     return True
+
 
 if not check_password():
     st.stop()
