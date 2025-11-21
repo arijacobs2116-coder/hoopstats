@@ -10,6 +10,44 @@ from PIL import Image
 from PyPDF2 import PdfReader
 import re
 
+def check_password():
+    """Return True if the user entered the correct password."""
+
+    def password_entered():
+        """Callback run when the user hits enter."""
+        if st.session_state["password"] == st.secrets["APP_PASSWORD"]:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # don't store the password
+        else:
+            st.session_state["password_correct"] = False
+
+    # First run: no password yet
+    if "password_correct" not in st.session_state:
+        st.text_input(
+            "Enter password",
+            type="password",
+            key="password",
+            on_change=password_entered,
+        )
+        return False
+
+    # Wrong password
+    if not st.session_state["password_correct"]:
+        st.text_input(
+            "Enter password",
+            type="password",
+            key="password",
+            on_change=password_entered,
+        )
+        st.error("Incorrect password.")
+        return False
+
+    # Correct password
+    return True
+
+if not check_password():
+    st.stop()
+
 # ---------------- Streamlit page config ----------------
 
 st.set_page_config(page_title="College Basketball Stats Organizer", layout="wide")
