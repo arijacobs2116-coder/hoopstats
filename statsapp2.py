@@ -11,52 +11,61 @@ from PyPDF2 import PdfReader
 import re
 
 
+
+def render_footer():
+    st.markdown(
+        """
+        <style>
+        .aj-footer {
+            position: fixed;
+            left: 0;
+            bottom: 0;
+            width: 100%;
+            text-align: center;
+            font-size: 22px;
+            color: gray;
+            padding: 10px 0;
+        }
+        </style>
+        <div class="aj-footer">©Ari Jacobs</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 def check_password():
     """Returns True if the correct password was entered."""
 
     def password_entered():
-        """Checks whether the entered password is correct."""
         if st.session_state["password"] == st.secrets["APP_PASSWORD"]:
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # remove password from state
+            del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
 
-    # If no password typed yet:
+    # First time: ask for password
     if "password_correct" not in st.session_state:
         st.text_input(
             "Enter password",
             type="password",
             key="password",
-            on_change=password_entered
+            on_change=password_entered,
         )
-
-        # *** YOUR FOOTER HERE ***
-        st.markdown(
-            "<p style='text-align: center; font-size: 22px; color: gray;'>©Ari Jacobs 2025</p>",
-            unsafe_allow_html=True,
-        )
-
+        render_footer()   # <--- footer on first load
         return False
 
-    # If incorrect password:
+    # Wrong password
     if not st.session_state["password_correct"]:
         st.text_input(
             "Enter password",
             type="password",
             key="password",
-            on_change=password_entered
+            on_change=password_entered,
         )
         st.error("Incorrect password.")
-
-        # *** YOUR FOOTER HERE ***
-        st.markdown(
-            "<p style='text-align: center; font-size: 22px; color: gray;'>©Ari Jacobs</p>",
-            unsafe_allow_html=True,
-        )
-
+        render_footer()   # <--- footer on error too
         return False
 
+    # Correct password
     return True
 
 
