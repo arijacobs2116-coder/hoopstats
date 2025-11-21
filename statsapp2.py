@@ -167,17 +167,18 @@ def extract_numbers(line: str):
 def parse_kenpom_paste(raw: str) -> pd.DataFrame:
     """
     Parse raw text copied directly from a KenPom player-usage/advanced page.
+
     Handles:
       - Header row (Ht Wt Yr G S ...)
-      - Usage category headers (Go-to guys, Major Contributors, etc.)
+      - Usage category headers (Go-to guys, etc.)
       - 'National Rank' lines
-      - Random line breaks and rank numbers between stats
+      - Line breaks and rank numbers between stats
 
-    Returns a DataFrame with one row per player and all advanced stats aligned.
+    Returns a DataFrame with one row per player.
     """
     import re
 
-    # --------- CLEAN LINES: DROP HEADER + CATEGORY TITLES ----------
+    # ---------- 1) CLEAN LINES ----------
     lines = [ln.rstrip() for ln in raw.splitlines()]
     lines = [ln for ln in lines if ln.strip()]
 
@@ -197,7 +198,7 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
 
     lines = cleaned
 
-    # --------- FIND PLAYER BLOCK STARTS ----------
+    # ---------- 2) FIND PLAYER BLOCK STARTS ----------
     # A player block starts with: "2 Jahvin Carter", "55 Sean Smith", etc.
     player_starts = [
         idx for idx, line in enumerate(lines)
@@ -208,7 +209,7 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
         raise ValueError("Could not find any player lines in the pasted KenPom text.")
 
     def parse_player_block(block_lines: list[str]) -> dict | None:
-        # Smash block lines together so we don't care about where line breaks were
+        # Flatten block so we don't care about original line breaks
         text = " ".join(block_lines)
         tokens = text.split()
         if not tokens:
@@ -229,7 +230,7 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
             i += 1
         tokens = filtered
 
-        # Jersey number
+        # Jersey
         if not tokens[0].isdigit():
             return None
         jersey = tokens[0]
@@ -238,7 +239,7 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
         name_tokens = []
         height_idx = None
         for i in range(1, len(tokens)):
-            if re.match(r"^\d+-\d+$", tokens[i]):  # height like 6-3, 6-11
+            if re.match(r"^\d+-\d+$", tokens[i]):  # 6-3, 6-11, etc.
                 height_idx = i
                 break
             name_tokens.append(tokens[i])
@@ -249,7 +250,7 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
         name = " ".join(name_tokens)
 
         # ---- Basic info: height, weight, year, games, starts (optional) ----
-        def safe_get(idx, default=""):
+        def safe_get(idx: int, default: str = "") -> str:
             return tokens[idx] if idx < len(tokens) else default
 
         ht = safe_get(height_idx)
@@ -260,19 +261,19 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
         g = safe_get(j)
         j += 1
 
-        # S (starts) is optional – if the next token has a '.', it's actually %Min
+        # S (starts) is optional – if next token has a '.', it's actually %Min
         s = ""
         if j < len(tokens) and "." not in tokens[j]:
             s = tokens[j]
             j += 1
 
-        # %Min is always a decimal
+        # %Min (always decimal)
         pct_min = float(tokens[j])
         j += 1
 
         # ---- Helper: read next stat, skipping integer rank tokens ----
         def next_stat(idx: int):
-            # Skip tokens that don't have a '.' → these are ranks / junk
+            # Only accept tokens with '.' (all KenPom advanced stats use a decimal)
             while idx < len(tokens) and "." not in tokens[idx]:
                 idx += 1
             if idx >= len(tokens):
@@ -281,10 +282,10 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
             idx += 1
             return v, idx
 
-        # ORtg comes next (sometimes there's a rank between %Min and ORtg)
+        # ORtg after %Min (possibly with rank in between)
         ortg, j = next_stat(j)
 
-        # The rest of the advanced stats come in this order:
+        # Remaining advanced stats in order:
         stat_keys = [
             "%Poss",
             "%Shots",
@@ -301,27 +302,30 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
             "FTRate",
         ]
 
-        stats = {}
+        stats: dict[str, float | None] = {}
         for key in stat_keys:
             stats[key], j = next_stat(j)
 
-        # ---- Parse shooting splits from the END (FT, 2P, 3P) ----
+        # ---- Parse FT / 2P / 3P splits from the END ----
         def parse_splits(tokens: list[str]):
             ftma = ftpct = twoma = twopct = threema = threepct = None
             idx = len(tokens) - 1
 
             def prev_pct(k: int):
+                # Move left until token contains '.' (".750", ".500", ".333", etc.)
+                while k >= 0 and "." not in tokens[k]:
+                    k -= 1
                 if k < 0:
                     return None, k
                 try:
                     v = float(tokens[k])
-                    return v, k - 1
                 except ValueError:
-                    return None, k - 1
+                    v = None
+                return v, k - 1
 
             def prev_ma(k: int):
                 while k >= 0:
-                    if re.match(r"^\d+-\d+$", tokens[k]):
+                    if re.match(r"^\d+-\d+$", tokens[k]):  # like 9-12, 4-8
                         return tokens[k], k - 1
                     k -= 1
                 return None, k
@@ -369,8 +373,8 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
         }
         return row
 
-    # --------- Build DataFrame for all players ---------
-    players = []
+    # ---------- 3) BUILD DATAFRAME ----------
+    players: list[dict] = []
     for idx, start_idx in enumerate(player_starts):
         end_idx = player_starts[idx + 1] if idx + 1 < len(player_starts) else len(lines)
         block = lines[start_idx:end_idx]
@@ -379,9 +383,6 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
             players.append(row)
 
     df = pd.DataFrame(players)
-
-    # DO NOT pass through _final_clean_kenpom_df here – that was scrambling values.
-    # Just return exactly what we parsed.
     return df
 
 
