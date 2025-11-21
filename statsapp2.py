@@ -167,12 +167,17 @@ def extract_numbers(line: str):
 def parse_kenpom_paste(raw: str) -> pd.DataFrame:
     """
     Parse raw text copied directly from a KenPom player-usage/advanced page.
-    Handles category headers, 'National Rank' lines, random line breaks,
-    and rank numbers between stats.
+    Handles:
+      - Header row (Ht Wt Yr G S ...)
+      - Usage category headers (Go-to guys, Major Contributors, etc.)
+      - 'National Rank' lines
+      - Random line breaks and rank numbers between stats
+
+    Returns a DataFrame with one row per player and all advanced stats aligned.
     """
     import re
 
-    # --------- CLEAN LINES (DROP HEADER + CATEGORY TITLES) ---------
+    # --------- CLEAN LINES: DROP HEADER + CATEGORY TITLES ----------
     lines = [ln.rstrip() for ln in raw.splitlines()]
     lines = [ln for ln in lines if ln.strip()]
 
@@ -192,7 +197,7 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
 
     lines = cleaned
 
-    # --------- FIND PLAYER BLOCK STARTS ---------
+    # --------- FIND PLAYER BLOCK STARTS ----------
     # A player block starts with: "2 Jahvin Carter", "55 Sean Smith", etc.
     player_starts = [
         idx for idx, line in enumerate(lines)
@@ -244,12 +249,15 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
         name = " ".join(name_tokens)
 
         # ---- Basic info: height, weight, year, games, starts (optional) ----
-        ht = tokens[height_idx]
-        wt = tokens[height_idx + 1]
-        yr = tokens[height_idx + 2]
+        def safe_get(idx, default=""):
+            return tokens[idx] if idx < len(tokens) else default
+
+        ht = safe_get(height_idx)
+        wt = safe_get(height_idx + 1)
+        yr = safe_get(height_idx + 2)
 
         j = height_idx + 3
-        g = tokens[j]
+        g = safe_get(j)
         j += 1
 
         # S (starts) is optional – if the next token has a '.', it's actually %Min
@@ -264,7 +272,7 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
 
         # ---- Helper: read next stat, skipping integer rank tokens ----
         def next_stat(idx: int):
-            # Skip tokens that don't have a '.' → these are ranks
+            # Skip tokens that don't have a '.' → these are ranks / junk
             while idx < len(tokens) and "." not in tokens[idx]:
                 idx += 1
             if idx >= len(tokens):
@@ -372,9 +380,9 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
 
     df = pd.DataFrame(players)
 
-    # If you already have a cleaner used by load_and_clean_kenpom_csv,
-    # keep this line so the schema matches:
-    df = _final_clean_kenpom_df(df)
+    # If you have a final cleaner to match the CSV schema, keep this:
+    if "_final_clean_kenpom_df" in globals():
+        df = _final_clean_kenpom_df(df)
 
     return df
 
