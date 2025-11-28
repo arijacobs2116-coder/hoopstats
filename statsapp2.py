@@ -1126,10 +1126,6 @@ if overview_file is not None:
         # =====================================================
         else:
             # ---- Figure out which columns are "basketball stats" (on-court) ----
-            # Criteria:
-            #   - Not Jersey/Player
-            #   - Not obvious ID / team / competition / meta fields
-            #   - Not bool or string columns (we only want numeric stats)
             meta_id_cols = {
                 "competitionId",
                 "teamId",
@@ -1188,7 +1184,7 @@ if overview_file is not None:
                 "Defense/Rebounding package": [
                     "orbPct", "drbPct", "stlPct", "blkPct", "pfP40", "pfEff",
                 ],
-                "All available": basketball_cols,  # literally everything on-court numeric
+                "All available": basketball_cols,
             }
 
             preset_choice = st.selectbox(
@@ -1207,24 +1203,34 @@ if overview_file is not None:
                 option_labels.append(label)
                 label_to_col[label] = col
 
-            # Default selection for multiselect based on preset
+            # --- Determine what the preset *wants* to select ---
             preset_cols = PRESET_DEFS.get(preset_choice, [])
             if not preset_cols or preset_choice == "(none)":
                 # Start with all basketball stats
-                default_labels = option_labels
+                preset_labels = option_labels
             else:
                 allowed_cols = [c for c in preset_cols if c in basketball_cols]
                 if allowed_cols:
-                    default_labels = [
+                    preset_labels = [
                         overview_col_to_label.get(c, c) for c in allowed_cols
                     ]
                 else:
-                    default_labels = option_labels
+                    preset_labels = option_labels
 
+            # --- Sync preset -> multiselect via session_state ---
+            if "overview_selected_stats" not in st.session_state:
+                st.session_state["overview_selected_stats"] = preset_labels
+
+            prev_preset = st.session_state.get("overview_last_preset")
+            if preset_choice != prev_preset:
+                # preset changed → overwrite selection
+                st.session_state["overview_selected_stats"] = preset_labels
+            st.session_state["overview_last_preset"] = preset_choice
+
+            # Multiselect driven by session_state – no default=
             selected_labels = st.multiselect(
                 "Choose which overview stats to include (top to bottom = left-to-right ordering in DOCX):",
                 options=option_labels,
-                default=default_labels,
                 key="overview_selected_stats",
             )
 
