@@ -1929,6 +1929,605 @@ else:
     )
 
 
+# =========================================================
+#  FULL SCOUT PACKET DOCX (COMBINED, RESPECTS USER SETTINGS)
+# =========================================================
+
+st.markdown("---")
+st.subheader("Full Scout Packet (Combined DOCX)")
+
+if title_text == "":
+    st.error("❗ Please enter a team name before generating the Full Scout Packet.")
+elif logo_bytes is None:
+    st.error("❗ Please upload a team logo before generating the Full Scout Packet.")
+else:
+    has_adv = "df_stats" in locals() and isinstance(df_stats, pd.DataFrame)
+    has_overview = "df_overview" in locals() and isinstance(df_overview, pd.DataFrame)
+    has_shot = (
+        "df_shooting" in locals() and isinstance(df_shooting, pd.DataFrame)
+        and "df_fg" in locals() and isinstance(df_fg, pd.DataFrame)
+    )
+
+    if not (has_adv or has_overview or has_shot):
+        st.info(
+            "Generate at least one of: Advanced Stats, Overview, or Shot Diet/FG% above "
+            "to unlock the Full Scout Packet."
+        )
+    else:
+        full_doc = Document()
+        style = full_doc.styles["Normal"]
+        font = style.font
+        font.name = "Calibri"
+        font.size = Pt(11)
+        style.paragraph_format.space_before = Pt(0)
+        style.paragraph_format.space_after = Pt(0)
+
+        # Logo + main title
+        if logo_bytes:
+            full_doc.add_picture(BytesIO(logo_bytes), width=Inches(1.2))
+            full_doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        main_title = full_doc.add_paragraph()
+        run = main_title.add_run(f"{title_text} SCOUTING REPORT")
+        run.bold = True
+        run.font.size = Pt(16)
+        if header_color is not None:
+            run.font.color.rgb = header_color
+        main_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        main_title.paragraph_format.space_after = Pt(6)
+
+        # helper to add section headings
+        def add_section_heading(doc, text):
+            p = doc.add_paragraph()
+            r = p.add_run(text)
+            r.bold = True
+            r.font.size = Pt(14)
+            if header_color is not None:
+                r.font.color.rgb = header_color
+            p.paragraph_format.space_before = Pt(6)
+            p.paragraph_format.space_after = Pt(4)
+            p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+        # -----------------------
+        # OVERVIEW SECTION
+        # -----------------------
+        if has_overview:
+            add_section_heading(full_doc, "OVERVIEW STATISTICS")
+
+            # same base lists as overview section
+            BASE_LEFT_OVERVIEW = [
+                ("tsPct", "True Shooting %"),
+                ("fgaP40", "Field Goal Attempts per 40 (FGA/40)"),
+                ("fg2Pct", "Two-Point %"),
+                ("astPct", "Assist %"),
+                ("astTov", "Assist-to-Turnover"),
+                ("tovPct", "Turnover %"),
+                ("astUsage", "Assist/Usage"),
+                ("drbPct", "Defensive Rebound %"),
+                ("blkPct", "Block %"),
+            ]
+            BASE_RIGHT_OVERVIEW = [
+                ("fg3Pct", "Three-Point %"),
+                ("ftPct", "Free Throw %"),
+                ("fga3Rate", "Three-Point Attempt Rate"),
+                ("usagePct", "Usage %"),
+                ("ftaRate", "Free Throw Attempt Rate"),
+                ("orbPct", "Offensive Rebound %"),
+                ("stlPct", "Steal %"),
+                ("pfP40", "Personal Fouls per 40"),
+                ("pfEff", "PF Efficiency"),
+            ]
+            overview_col_to_label = {
+                col: label for col, label in (BASE_LEFT_OVERVIEW + BASE_RIGHT_OVERVIEW)
+            }
+
+            overview_layout_mode = st.session_state.get(
+                "overview_layout_mode", "Default"
+            )
+
+            # determine overview_pairs based on mode + previous selection
+            overview_pairs = []
+
+            if overview_layout_mode == "Default":
+                max_len_ov = max(len(BASE_LEFT_OVERVIEW), len(BASE_RIGHT_OVERVIEW))
+                for i in range(max_len_ov):
+                    left = BASE_LEFT_OVERVIEW[i] if i < len(BASE_LEFT_OVERVIEW) else None
+                    right = BASE_RIGHT_OVERVIEW[i] if i < len(BASE_RIGHT_OVERVIEW) else None
+                    overview_pairs.append((left, right))
+            else:
+                # rebuild basketball_cols like before
+                meta_id_cols = {
+                    "competitionId",
+                    "teamId",
+                    "playerId",
+                    "tournamentId",
+                    "priorCompetitionId",
+                    "nextTeamId",
+                    "nextCompetitionId",
+                    "nextTournamentId",
+                }
+                meta_name_substrings = [
+                    "team",
+                    "market",
+                    "name",
+                    "school",
+                    "conf",
+                    "league",
+                    "next",
+                    "city",
+                    "state",
+                    "country",
+                ]
+
+                basketball_cols = []
+                for c in df_overview.columns:
+                    if c in ["Jersey", "Player"]:
+                        continue
+                    cl = c.lower()
+                    if c in meta_id_cols or cl.endswith("id"):
+                        continue
+                    if cl.startswith(("is", "has", "will")):
+                        continue
+                    if any(sub in cl for sub in meta_name_substrings):
+                        continue
+                    dt = df_overview[c].dtype
+                    if str(dt) in ["bool", "object"]:
+                        continue
+                    basketball_cols.append(c)
+
+                # label mapping
+                label_to_col = {}
+                for col in basketball_cols:
+                    label = overview_col_to_label.get(col, col)
+                    label_to_col[label] = col
+
+                selected_labels = st.session_state.get("overview_selected_stats", [])
+                if not selected_labels:
+                    # fallback to default if no selection
+                    max_len_ov = max(len(BASE_LEFT_OVERVIEW), len(BASE_RIGHT_OVERVIEW))
+                    for i in range(max_len_ov):
+                        left = BASE_LEFT_OVERVIEW[i] if i < len(BASE_LEFT_OVERVIEW) else None
+                        right = BASE_RIGHT_OVERVIEW[i] if i < len(BASE_RIGHT_OVERVIEW) else None
+                        overview_pairs.append((left, right))
+                else:
+                    selected_pairs = [
+                        (label_to_col[label], label)
+                        for label in selected_labels
+                        if label in label_to_col
+                    ]
+                    for i in range(0, len(selected_pairs), 2):
+                        left = selected_pairs[i]
+                        right = (
+                            selected_pairs[i + 1]
+                            if i + 1 < len(selected_pairs)
+                            else None
+                        )
+                        overview_pairs.append((left, right))
+
+            # render overview_pairs
+            for left_cat, right_cat in overview_pairs:
+                table = full_doc.add_table(rows=1, cols=2)
+                table.autofit = True
+                remove_table_borders(table)
+
+                left_cell = table.rows[0].cells[0]
+                right_cell = table.rows[0].cells[1]
+
+                # LEFT
+                if left_cat is not None:
+                    col, title = left_cat
+                    p = left_cell.add_paragraph()
+                    r = p.add_run(title)
+                    r.bold = True
+                    r.font.size = Pt(16)
+                    if header_color is not None:
+                        r.font.color.rgb = header_color
+                    p.paragraph_format.space_before = Pt(0)
+                    p.paragraph_format.space_after = Pt(0)
+                    p.paragraph_format.line_spacing = Pt(11)
+
+                    if col in df_overview.columns:
+                        df_cat = df_overview.copy()
+                        df_cat[col] = pd.to_numeric(df_cat[col], errors="coerce")
+                        df_cat["sort_val"] = df_cat[col].fillna(-1e9)
+                        df_cat = df_cat.sort_values("sort_val", ascending=False)
+
+                        for rank, (_, row) in enumerate(df_cat.iterrows(), start=1):
+                            jersey = clean_jersey(row["Jersey"])
+                            name = str(row["Player"])
+
+                            if pd.isna(row[col]):
+                                val_str = "DNQ"
+                            else:
+                                val_str = format_overview_value(col, row[col])
+
+                            pl = left_cell.add_paragraph()
+                            pr = pl.add_run(f"{rank}. #{jersey} {name} – {val_str}")
+                            pr.font.size = Pt(11)
+                            pl.paragraph_format.space_before = Pt(0)
+                            pl.paragraph_format.space_after = Pt(0)
+                            pl.paragraph_format.line_spacing = Pt(11)
+
+                # RIGHT
+                if right_cat is not None:
+                    col, title = right_cat
+                    p = right_cell.add_paragraph()
+                    r = p.add_run(title)
+                    r.bold = True
+                    r.font.size = Pt(16)
+                    if header_color is not None:
+                        r.font.color.rgb = header_color
+                    p.paragraph_format.space_before = Pt(0)
+                    p.paragraph_format.space_after = Pt(0)
+                    p.paragraph_format.line_spacing = Pt(11)
+
+                    if col in df_overview.columns:
+                        df_cat = df_overview.copy()
+                        df_cat[col] = pd.to_numeric(df_cat[col], errors="coerce")
+                        df_cat["sort_val"] = df_cat[col].fillna(-1e9)
+                        df_cat = df_cat.sort_values("sort_val", ascending=False)
+
+                        for rank, (_, row) in enumerate(df_cat.iterrows(), start=1):
+                            jersey = clean_jersey(row["Jersey"])
+                            name = str(row["Player"])
+
+                            if pd.isna(row[col]):
+                                val_str = "DNQ"
+                            else:
+                                val_str = format_overview_value(col, row[col])
+
+                            pl = right_cell.add_paragraph()
+                            pr = pl.add_run(f"{rank}. #{jersey} {name} – {val_str}")
+                            pr.font.size = Pt(11)
+                            pl.paragraph_format.space_before = Pt(0)
+                            pl.paragraph_format.space_after = Pt(0)
+                            pl.paragraph_format.line_spacing = Pt(11)
+
+                spacer = full_doc.add_paragraph()
+                spacer.paragraph_format.space_before = Pt(0)
+                spacer.paragraph_format.space_after = Pt(0)
+                spacer.paragraph_format.line_spacing = Pt(0.25)
+
+        # -----------------------
+        # ADVANCED SECTION
+        # -----------------------
+        if has_adv:
+            add_section_heading(full_doc, "ADVANCED STATISTICS")
+
+            BASE_ADV_CATEGORIES = [
+                ("ORtg", "Offensive Rating"),
+                ("FTRate", "Free-Throw Rate"),
+                ("%Poss", "% of Possessions"),
+                ("eFG%", "Effective FG%"),
+                ("%Shots", "% of Shots"),
+                ("TS%", "True Shooting %"),
+                ("OR%", "Offensive Rebound %"),
+                ("DR%", "Defensive Rebound %"),
+                ("TORate", "Turnover Rate"),
+                ("ARate", "Assist Rate"),
+                ("FD/40", "Fouls Drawn per 40"),
+                ("FC/40", "Fouls Committed per 40"),
+                ("Blk%", "Block %"),
+                ("Stl%", "Steal %"),
+            ]
+            adv_col_to_label = {col: label for col, label in BASE_ADV_CATEGORIES}
+
+            advanced_layout_mode = st.session_state.get(
+                "advanced_layout_mode", "Default"
+            )
+
+            adv_pairs = []
+            if advanced_layout_mode == "Default":
+                for i in range(0, len(BASE_ADV_CATEGORIES), 2):
+                    if i + 1 < len(BASE_ADV_CATEGORIES):
+                        adv_pairs.append(
+                            (BASE_ADV_CATEGORIES[i], BASE_ADV_CATEGORIES[i + 1])
+                        )
+                    else:
+                        adv_pairs.append((BASE_ADV_CATEGORIES[i], None))
+            else:
+                # build mapping to recover columns from labels
+                label_to_col_adv = {}
+                for col, label in BASE_ADV_CATEGORIES:
+                    label_to_col_adv[label] = col
+
+                selected_labels = st.session_state.get("advanced_selected_stats", [])
+                if not selected_labels:
+                    # fallback to default
+                    for i in range(0, len(BASE_ADV_CATEGORIES), 2):
+                        if i + 1 < len(BASE_ADV_CATEGORIES):
+                            adv_pairs.append(
+                                (BASE_ADV_CATEGORIES[i], BASE_ADV_CATEGORIES[i + 1])
+                            )
+                        else:
+                            adv_pairs.append((BASE_ADV_CATEGORIES[i], None))
+                else:
+                    selected_pairs = [
+                        (label_to_col_adv[label], label)
+                        for label in selected_labels
+                        if label in label_to_col_adv
+                    ]
+                    for i in range(0, len(selected_pairs), 2):
+                        left = selected_pairs[i]
+                        right = (
+                            selected_pairs[i + 1]
+                            if i + 1 < len(selected_pairs)
+                            else None
+                        )
+                        adv_pairs.append((left, right))
+
+            # render adv_pairs
+            for left_cat, right_cat in adv_pairs:
+                table = full_doc.add_table(rows=1, cols=2)
+                table.autofit = True
+                remove_table_borders(table)
+
+                left_cell = table.rows[0].cells[0]
+                right_cell = table.rows[0].cells[1]
+
+                # LEFT
+                if left_cat is not None:
+                    col, title = left_cat
+                    p = left_cell.add_paragraph()
+                    r = p.add_run(title)
+                    r.bold = True
+                    r.font.size = Pt(16)
+                    if header_color is not None:
+                        r.font.color.rgb = header_color
+                    p.paragraph_format.space_before = Pt(0)
+                    p.paragraph_format.space_after = Pt(0)
+                    p.paragraph_format.line_spacing = Pt(11)
+
+                    if col in df_stats.columns:
+                        df_cat = df_stats.copy()
+                        df_cat[col] = pd.to_numeric(df_cat[col], errors="coerce")
+                        df_cat["sort_val"] = df_cat[col].fillna(-1e9)
+                        df_cat = df_cat.sort_values("sort_val", ascending=False)
+
+                        for rank, (_, row) in enumerate(df_cat.iterrows(), start=1):
+                            value = row[col]
+                            jersey = clean_jersey(row["Jersey"])
+                            name = str(row["Player"])
+
+                            if pd.isna(value):
+                                val_str = "DNQ"
+                                suffix = ""
+                            else:
+                                if abs(value - int(value)) < 1e-6:
+                                    val_str = f"{int(value)}"
+                                else:
+                                    val_str = f"{value:.1f}"
+                                suffix = "" if col in ["ORtg", "FC/40", "FD/40"] else "%"
+
+                            pl = left_cell.add_paragraph()
+                            pr = pl.add_run(f"{rank}. #{jersey} {name} – {val_str}{suffix}")
+                            pr.font.size = Pt(11)
+                            pl.paragraph_format.space_before = Pt(0)
+                            pl.paragraph_format.space_after = Pt(0)
+                            pl.paragraph_format.line_spacing = Pt(11)
+
+                # RIGHT
+                if right_cat is not None:
+                    col, title = right_cat
+                    p = right_cell.add_paragraph()
+                    r = p.add_run(title)
+                    r.bold = True
+                    r.font.size = Pt(16)
+                    if header_color is not None:
+                        r.font.color.rgb = header_color
+                    p.paragraph_format.space_before = Pt(0)
+                    p.paragraph_format.space_after = Pt(0)
+                    p.paragraph_format.line_spacing = Pt(11)
+
+                    if col in df_stats.columns:
+                        df_cat = df_stats.copy()
+                        df_cat[col] = pd.to_numeric(df_cat[col], errors="coerce")
+                        df_cat["sort_val"] = df_cat[col].fillna(-1e9)
+                        df_cat = df_cat.sort_values("sort_val", ascending=False)
+
+                        for rank, (_, row) in enumerate(df_cat.iterrows(), start=1):
+                            value = row[col]
+                            jersey = clean_jersey(row["Jersey"])
+                            name = str(row["Player"])
+
+                            if pd.isna(value):
+                                val_str = "DNQ"
+                                suffix = ""
+                            else:
+                                if abs(value - int(value)) < 1e-6:
+                                    val_str = f"{int(value)}"
+                                else:
+                                    val_str = f"{value:.1f}"
+                                suffix = "" if col in ["ORtg", "FC/40", "FD/40"] else "%"
+
+                            pl = right_cell.add_paragraph()
+                            pr = pl.add_run(f"{rank}. #{jersey} {name} – {val_str}{suffix}")
+                            pr.font.size = Pt(11)
+                            pl.paragraph_format.space_before = Pt(0)
+                            pl.paragraph_format.space_after = Pt(0)
+                            pl.paragraph_format.line_spacing = Pt(11)
+
+                spacer = full_doc.add_paragraph()
+                spacer.paragraph_format.space_before = Pt(0)
+                spacer.paragraph_format.space_after = Pt(0)
+                spacer.paragraph_format.line_spacing = Pt(0.25)
+
+        # -----------------------
+        # SHOT DIET + FG% SECTION
+        # -----------------------
+        if has_shot:
+            # SHOT DIET
+            add_section_heading(full_doc, "SHOT DIET RANKINGS")
+
+            left_zone_categories = [
+                ("FGA% At Rim", "FGA% -- At the Rim"),
+                ("FGA% In Paint", "FGA% -- In the Paint"),
+                ("FGA% Midrange 2s", "FGA% -- Mid-Range 2s"),
+                ("FGA% All 2 PT Attempts", "FGA% -- All 2 PT Attempts"),
+            ]
+            right_zone_categories = [
+                ("FGA% Above Break 3s", "FGA% -- Above the Break 3s"),
+                ("FGA% Corner 3s", "FGA% -- Corner 3s"),
+                ("FGA% All 3 PT Attempts", "FGA% -- All 3 PT Attempts"),
+            ]
+
+            max_rows = max(len(left_zone_categories), len(right_zone_categories))
+            shot_table = full_doc.add_table(rows=max_rows, cols=2)
+            shot_table.autofit = True
+            remove_table_borders(shot_table)
+
+            for i in range(max_rows):
+                left_cell = shot_table.rows[i].cells[0]
+                right_cell = shot_table.rows[i].cells[1]
+
+                # LEFT
+                if i < len(left_zone_categories):
+                    col, ttl = left_zone_categories[i]
+                    p = left_cell.paragraphs[0]
+                    p.text = ""
+                    r = p.add_run(ttl)
+                    r.bold = True
+                    r.font.size = Pt(16)
+                    if header_color is not None:
+                        r.font.color.rgb = header_color
+
+                    if col in df_shooting.columns:
+                        df_sorted = df_shooting.sort_values(by=col, ascending=False)
+                        for rank, (_, row_s) in enumerate(df_sorted.iterrows(), start=1):
+                            val_str = f"{row_s[col]:.1f}%"
+                            jersey = str(row_s["Jersey"]).strip()
+                            name = str(row_s["Player"])
+                            left_cell.add_paragraph(
+                                f"{rank}. #{jersey} {name} – {val_str}"
+                            )
+
+                # RIGHT
+                if i < len(right_zone_categories):
+                    col, ttl = right_zone_categories[i]
+                    p = right_cell.paragraphs[0]
+                    p.text = ""
+                    r = p.add_run(ttl)
+                    r.bold = True
+                    r.font.size = Pt(16)
+                    if header_color is not None:
+                        r.font.color.rgb = header_color
+
+                    if col in df_shooting.columns:
+                        df_sorted = df_shooting.sort_values(by=col, ascending=False)
+                        for rank, (_, row_s) in enumerate(df_sorted.iterrows(), start=1):
+                            val_str = f"{row_s[col]:.1f}%"
+                            jersey = str(row_s["Jersey"]).strip()
+                            name = str(row_s["Player"])
+                            right_cell.add_paragraph(
+                                f"{rank}. #{jersey} {name} – {val_str}"
+                            )
+
+            for row in shot_table.rows:
+                for cell in row.cells:
+                    for para in cell.paragraphs:
+                        para.paragraph_format.space_before = Pt(0)
+                        para.paragraph_format.space_after = Pt(0)
+
+            # FG% BY ZONE
+            add_section_heading(full_doc, "FG% BY ZONE RANKINGS")
+
+            fg_left_sections = [
+                ("FG% - At the Rim",       "At Rim FG",       "At Rim Makes",       "At Rim Attempts"),
+                ("FG% - Paint 2s",         "In Paint FG",     "In Paint Makes",     "In Paint Attempts"),
+                ("FG% - Mid-Range 2s",     "Midrange 2s FG",  "Midrange 2s Makes",  "Midrange 2s Attempts"),
+                ("FG% - All 2pt Attempts", "Total 2pt FG",    "Total 2pt Makes",    "Total 2pt Attempts"),
+            ]
+            fg_right_sections = [
+                ("FG% – Above-the Break 3s", "Above Break 3s FG", "Above Break 3s Makes", "Above Break 3s Attempts"),
+                ("FG% – Corner 3s",          "Corner 3s FG",      "Corner 3s Makes",      "Corner 3s Attempts"),
+                ("FG% - All 3pt Attempts",   "Total 3pt FG",      "Total 3pt Makes",      "Total 3pt Attempts"),
+            ]
+
+            max_len_fg = max(len(fg_left_sections), len(fg_right_sections))
+            fg_table = full_doc.add_table(rows=max_len_fg, cols=2)
+            fg_table.autofit = True
+            remove_table_borders(fg_table)
+
+            for i in range(max_len_fg):
+                left_cell = fg_table.rows[i].cells[0]
+                right_cell = fg_table.rows[i].cells[1]
+
+                # LEFT side (2PT)
+                if i < len(fg_left_sections):
+                    title, fg_col, make_col, att_col = fg_left_sections[i]
+                    p = left_cell.paragraphs[0]
+                    p.text = ""
+                    r = p.add_run(title)
+                    r.bold = True
+                    r.font.size = Pt(16)
+                    if header_color is not None:
+                        r.font.color.rgb = header_color
+
+                    if fg_col in df_fg.columns:
+                        df_sorted = df_fg.sort_values(by=fg_col, ascending=False)
+                        for rank, (_, row_fg) in enumerate(df_sorted.iterrows(), start=1):
+                            raw_val = row_fg.get(fg_col, 0.0)
+                            makes = int(row_fg.get(make_col, 0) or 0)
+                            attempts = int(row_fg.get(att_col, 0) or 0)
+
+                            if pd.isna(raw_val) or attempts == 0:
+                                val_display = 0.0
+                            else:
+                                val_display = float(raw_val)
+
+                            jersey = str(row_fg["Jersey"]).strip()
+                            name = str(row_fg["Player"])
+                            line = f"{rank}. #{jersey} {name} – {val_display:.1f}% ({makes}/{attempts})"
+                            left_cell.add_paragraph(line)
+
+                # RIGHT side (3PT)
+                if i < len(fg_right_sections):
+                    title, fg_col, make_col, att_col = fg_right_sections[i]
+                    p = right_cell.paragraphs[0]
+                    p.text = ""
+                    r = p.add_run(title)
+                    r.bold = True
+                    r.font.size = Pt(16)
+                    if header_color is not None:
+                        r.font.color.rgb = header_color
+
+                    if fg_col in df_fg.columns:
+                        df_sorted = df_fg.sort_values(by=fg_col, ascending=False)
+                        for rank, (_, row_fg) in enumerate(df_sorted.iterrows(), start=1):
+                            raw_val = row_fg.get(fg_col, 0.0)
+                            makes = int(row_fg.get(make_col, 0) or 0)
+                            attempts = int(row_fg.get(att_col, 0) or 0)
+
+                            if pd.isna(raw_val) or attempts == 0:
+                                val_display = 0.0
+                            else:
+                                val_display = float(raw_val)
+
+                            jersey = str(row_fg["Jersey"]).strip()
+                            name = str(row_fg["Player"])
+                            line = f"{rank}. #{jersey} {name} – {val_display:.1f}% ({makes}/{attempts})"
+                            right_cell.add_paragraph(line)
+
+            for row in fg_table.rows:
+                for cell in row.cells:
+                    for para in cell.paragraphs:
+                        para.paragraph_format.space_before = Pt(0)
+                        para.paragraph_format.space_after = Pt(0)
+
+        # download button
+        full_buffer = BytesIO()
+        full_doc.save(full_buffer)
+        full_buffer.seek(0)
+
+        full_filename = f"{safe_team_name}_full_scout_packet.docx"
+
+        st.download_button(
+            label="Download Full Scout Packet DOCX",
+            data=full_buffer,
+            file_name=full_filename,
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            key="download_full_scout_packet",
+        )
 
 
 
