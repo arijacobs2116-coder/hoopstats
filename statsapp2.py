@@ -1125,6 +1125,7 @@ if overview_file is not None:
             key="overview_layout_mode",
         )
 
+        # ------------- DEFAULT LAYOUT (ORIGINAL BEHAVIOR) -------------
         if overview_layout_mode == "Default":
             left_overview = BASE_LEFT_OVERVIEW
             right_overview = BASE_RIGHT_OVERVIEW
@@ -1135,11 +1136,12 @@ if overview_file is not None:
                 left = left_overview[i] if i < len(left_overview) else None
                 right = right_overview[i] if i < len(right_overview) else None
                 overview_pairs.append((left, right))
+
+        # ------------- CUSTOM LAYOUT (ANY COLUMNS + PRESETS) -------------
         else:
-            # CUSTOM: allow ANY column from df_overview (except Jersey/Player)
+            # allow ANY column from df_overview (except Jersey/Player)
             available_cols = [
-                c
-                for c in df_overview.columns
+                c for c in df_overview.columns
                 if c not in ["Jersey", "Player"]
             ]
 
@@ -1150,10 +1152,50 @@ if overview_file is not None:
                 option_labels.append(label)
                 label_to_col[label] = col
 
+            # Presets defined by column keys (we'll filter by availability)
+            PRESET_DEFS = {
+                "(none)": [],
+                "Shooting package": [
+                    "tsPct", "fg2Pct", "fg3Pct", "ftPct",
+                    "fgaP40", "fga3Rate", "ftaRate",
+                ],
+                "Creation package": [
+                    "astPct", "astTov", "astUsage", "usagePct", "tovPct",
+                ],
+                "Defense/Rebounding package": [
+                    "orbPct", "drbPct", "stlPct", "blkPct", "pfP40", "pfEff",
+                ],
+                "All available": available_cols,  # all stats in the DF
+            }
+
+            preset_choice = st.selectbox(
+                "Quick preset (optional)",
+                list(PRESET_DEFS.keys()),
+                index=0,
+                key="overview_preset",
+                help="Choose a preset to auto-select stats, or '(none)' to start from everything.",
+            )
+
+            # Figure out default selection for the multiselect based on preset
+            preset_cols = PRESET_DEFS.get(preset_choice, [])
+            if not preset_cols or preset_choice == "(none)":
+                # Start with all available
+                default_labels = option_labels
+            else:
+                # Only keep preset columns that actually exist in df_overview
+                allowed_cols = [c for c in preset_cols if c in available_cols]
+                if allowed_cols:
+                    default_labels = [
+                        overview_col_to_label.get(c, c) for c in allowed_cols
+                    ]
+                else:
+                    # fallback: everything if none of the preset cols exist
+                    default_labels = option_labels
+
             selected_labels = st.multiselect(
                 "Choose which overview stats to include (top to bottom = left-to-right ordering in DOCX):",
                 options=option_labels,
-                default=option_labels,
+                default=default_labels,
                 key="overview_selected_stats",
             )
 
@@ -1180,6 +1222,7 @@ if overview_file is not None:
                     )
                     overview_pairs.append((left, right))
 
+        # ------------- BUILD DOCX IF WE HAVE ANY PAIRS -------------
         if overview_pairs:
             overview_doc = Document()
             style = overview_doc.styles["Normal"]
