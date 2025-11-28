@@ -450,9 +450,13 @@ def parse_kenpom_paste(raw: str) -> pd.DataFrame:
 
 def load_and_clean_overview_csv(uploaded_file):
     """
-    Loads a CBB Analytics-style overview CSV and returns:
-      Jersey, Player, and the overview stats used in the layout.
-    Includes 'fga' (total FGA) for FG% makes/attempts logic.
+    Loads a CBB Analytics-style overview CSV and returns a DataFrame
+    with:
+      - 'Player' (from fullName)
+      - 'Jersey' (from jerseyNum, cleaned)
+      - ALL other columns kept as-is so they can be used in the Overview DOCX.
+
+    We only coerce non-name/jersey columns to numeric when possible.
     """
     df = pd.read_csv(uploaded_file)
 
@@ -464,42 +468,20 @@ def load_and_clean_overview_csv(uploaded_file):
         }
     )
 
+    if "Jersey" not in df.columns or "Player" not in df.columns:
+        raise ValueError("CSV must have 'fullName' and 'jerseyNum' columns (CBB Analytics export).")
+
     df["Jersey"] = df["Jersey"].apply(clean_jersey)
     df["Player"] = df["Player"].astype(str).str.strip()
 
-    needed_cols = [
-        "Jersey",
-        "Player",
-        "tsPct",
-        "fgaP40",
-        "fg2Pct",
-        "astPct",
-        "astTov",
-        "tovPct",
-        "astUsage",
-        "drbPct",
-        "blkPct",
-        "fg3Pct",
-        "ftPct",
-        "fga3Rate",
-        "usagePct",
-        "ftaRate",
-        "orbPct",
-        "stlPct",
-        "pfP40",
-        "pfEff",
-        "fga",  # total FGA for season
-    ]
-
-    cols_present = [c for c in needed_cols if c in df.columns]
-    df = df[cols_present].copy()
-
+    # Try to coerce all other columns to numeric where possible
     for col in df.columns:
         if col in ["Jersey", "Player"]:
             continue
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+        df[col] = pd.to_numeric(df[col], errors="ignore")
 
     return df
+
 
 
 def remove_table_borders(table):
@@ -1086,7 +1068,7 @@ if overview_file is not None:
         else:
             overview_result = "Qualified"
 
-        # ---------------- OVERVIEW LAYOUT MODE ----------------
+        # ---------------- BASE LABELS FOR COMMON OVERVIEW STATS ----------------
         BASE_LEFT_OVERVIEW = [
             ("tsPct", "True Shooting %"),
             ("fgaP40", "Field Goal Attempts per 40 (FGA/40)"),
@@ -1121,11 +1103,13 @@ if overview_file is not None:
             ["Default", "Custom"],
             index=0,
             horizontal=True,
-            help="Default = current preset categories. Custom = pick any stats from the table to appear in the DOCX.",
+            help="Default = current preset categories. Custom = pick basketball stats from the table to appear in the DOCX.",
             key="overview_layout_mode",
         )
 
-        # ------------- DEFAULT LAYOUT (ORIGINAL BEHAVIOR) -------------
+        # =====================================================
+        #  DEFAULT LAYOUT (ORIGINAL BEHAVIOR)
+        # =====================================================
         if overview_layout_mode == "Default":
             left_overview = BASE_LEFT_OVERVIEW
             right_overview = BASE_RIGHT_OVERVIEW
@@ -1137,22 +1121,61 @@ if overview_file is not None:
                 right = right_overview[i] if i < len(right_overview) else None
                 overview_pairs.append((left, right))
 
-        # ------------- CUSTOM LAYOUT (ANY COLUMNS + PRESETS) -------------
+        # =====================================================
+        #  CUSTOM LAYOUT (ANY BASKETBALL STATS + PRESETS)
+        # =====================================================
         else:
-            # allow ANY column from df_overview (except Jersey/Player)
-            available_cols = [
-                c for c in df_overview.columns
-                if c not in ["Jersey", "Player"]
+            # ---- Figure out which columns are "basketball stats" (on-court) ----
+            # Criteria:
+            #   - Not Jersey/Player
+            #   - Not obvious ID / team / competition / meta fields
+            #   - Not bool or string columns (we only want numeric stats)
+            meta_id_cols = {
+                "competitionId",
+                "teamId",
+                "playerId",
+                "tournamentId",
+                "priorCompetitionId",
+                "nextTeamId",
+                "nextCompetitionId",
+                "nextTournamentId",
+            }
+            meta_name_substrings = [
+                "team",
+                "market",
+                "name",
+                "school",
+                "conf",
+                "league",
+                "next",
+                "city",
+                "state",
+                "country",
             ]
 
-            option_labels = []
-            label_to_col = {}
-            for col in available_cols:
-                label = overview_col_to_label.get(col, col)  # fallback to raw col name
-                option_labels.append(label)
-                label_to_col[label] = col
+            basketball_cols = []
+            for c in df_overview.columns:
+                if c in ["Jersey", "Player"]:
+                    continue
 
-            # Presets defined by column keys (we'll filter by availability)
+                cl = c.lower()
+
+                # obvious ID/meta fields
+                if c in meta_id_cols or cl.endswith("id"):
+                    continue
+                if cl.startswith(("is", "has", "will")):
+                    continue
+                if any(sub in cl for sub in meta_name_substrings):
+                    continue
+
+                dt = df_overview[c].dtype
+                if str(dt) in ["bool", "object"]:
+                    # off-court, categorical, or text stuff → skip
+                    continue
+
+                basketball_cols.append(c)
+
+            # ---- Presets built on top of those basketball columns ----
             PRESET_DEFS = {
                 "(none)": [],
                 "Shooting package": [
@@ -1165,7 +1188,7 @@ if overview_file is not None:
                 "Defense/Rebounding package": [
                     "orbPct", "drbPct", "stlPct", "blkPct", "pfP40", "pfEff",
                 ],
-                "All available": available_cols,  # all stats in the DF
+                "All available": basketball_cols,  # literally everything on-court numeric
             }
 
             preset_choice = st.selectbox(
@@ -1173,23 +1196,29 @@ if overview_file is not None:
                 list(PRESET_DEFS.keys()),
                 index=0,
                 key="overview_preset",
-                help="Choose a preset to auto-select stats, or '(none)' to start from everything.",
+                help="Choose a preset to auto-select stats, or '(none)' to start from all available basketball stats.",
             )
 
-            # Figure out default selection for the multiselect based on preset
+            # Build label <-> col mapping only for basketball_cols
+            option_labels = []
+            label_to_col = {}
+            for col in basketball_cols:
+                label = overview_col_to_label.get(col, col)  # nice label if we know it
+                option_labels.append(label)
+                label_to_col[label] = col
+
+            # Default selection for multiselect based on preset
             preset_cols = PRESET_DEFS.get(preset_choice, [])
             if not preset_cols or preset_choice == "(none)":
-                # Start with all available
+                # Start with all basketball stats
                 default_labels = option_labels
             else:
-                # Only keep preset columns that actually exist in df_overview
-                allowed_cols = [c for c in preset_cols if c in available_cols]
+                allowed_cols = [c for c in preset_cols if c in basketball_cols]
                 if allowed_cols:
                     default_labels = [
                         overview_col_to_label.get(c, c) for c in allowed_cols
                     ]
                 else:
-                    # fallback: everything if none of the preset cols exist
                     default_labels = option_labels
 
             selected_labels = st.multiselect(
@@ -1222,7 +1251,9 @@ if overview_file is not None:
                     )
                     overview_pairs.append((left, right))
 
-        # ------------- BUILD DOCX IF WE HAVE ANY PAIRS -------------
+        # =====================================================
+        #  BUILD OVERVIEW DOCX
+        # =====================================================
         if overview_pairs:
             overview_doc = Document()
             style = overview_doc.styles["Normal"]
