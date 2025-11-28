@@ -813,7 +813,8 @@ if df_stats is not None:
         st.subheader("Parsed Advanced Stats Table")
         st.dataframe(df_stats, use_container_width=True)
 
-        categories = [
+        # ---------------- ADVANCED STATS LAYOUT MODE ----------------
+        ADVANCED_STAT_OPTIONS = [
             ("ORtg", "Offensive Rating"),
             ("FTRate", "Free-Throw Rate"),
             ("%Poss", "% of Possessions"),
@@ -830,144 +831,191 @@ if df_stats is not None:
             ("Stl%", "Steal %"),
         ]
 
-        doc = Document()
-        style = doc.styles["Normal"]
-        font = style.font
-        font.name = "Calibri"
-        font.size = Pt(11)
-
-        if logo_bytes:
-            logo_stream = BytesIO(logo_bytes)
-            doc.add_picture(logo_stream, width=Inches(1.2))
-            last_paragraph = doc.paragraphs[-1]
-            last_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-        title_paragraph = doc.add_paragraph()
-        run = title_paragraph.add_run(f"{title_text} ADVANCED STATISTICS")
-        run.bold = True
-        run.font.size = Pt(14)
-        if header_color is not None:
-            run.font.color.rgb = header_color
-        title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        title_paragraph.paragraph_format.space_after = Pt(4)
-
-        pairs = []
-        for i in range(0, len(categories), 2):
-            if i + 1 < len(categories):
-                pairs.append((categories[i], categories[i + 1]))
-            else:
-                pairs.append((categories[i], None))
-
-        for left_cat, right_cat in pairs:
-            table = doc.add_table(rows=1, cols=2)
-            table.autofit = True
-            remove_table_borders(table)
-
-            left_cell = table.rows[0].cells[0]
-            right_cell = table.rows[0].cells[1]
-
-            # LEFT CATEGORY
-            if left_cat is not None:
-                col, title = left_cat
-                p = left_cell.add_paragraph()
-                r = p.add_run(title)
-                r.bold = True
-                r.font.size = Pt(16)
-                if header_color is not None:
-                    r.font.color.rgb = header_color
-                p.paragraph_format.space_before = Pt(0)
-                p.paragraph_format.space_after = Pt(0)
-                p.paragraph_format.line_spacing = Pt(11)
-
-                if col in df_stats.columns:
-                    # copy + add DNQ sort logic
-                    df_cat = df_stats.copy()
-                    df_cat[col] = pd.to_numeric(df_cat[col], errors="coerce")
-                    df_cat["sort_val"] = df_cat[col].fillna(-1e9)
-                    df_cat = df_cat.sort_values("sort_val", ascending=False)
-
-                    for rank, (_, row) in enumerate(df_cat.iterrows(), start=1):
-                        value = row[col]
-                        jersey = clean_jersey(row["Jersey"])
-                        name = str(row["Player"])
-
-                        if pd.isna(value):
-                            # DNQ player
-                            val_str = "DNQ"
-                            suffix = ""
-                        else:
-                            if abs(value - int(value)) < 1e-6:
-                                val_str = f"{int(value)}"
-                            else:
-                                val_str = f"{value:.1f}"
-                            suffix = "" if col in ["ORtg", "FC/40", "FD/40"] else "%"
-
-                        pl = left_cell.add_paragraph()
-                        pr = pl.add_run(f"{rank}. #{jersey} {name} – {val_str}{suffix}")
-                        pr.font.size = Pt(11)
-                        pl.paragraph_format.space_before = Pt(0)
-                        pl.paragraph_format.space_after = Pt(0)
-                        pl.paragraph_format.line_spacing = Pt(11)
-
-            # RIGHT CATEGORY
-            if right_cat is not None:
-                col, title = right_cat
-                p = right_cell.add_paragraph()
-                r = p.add_run(title)
-                r.bold = True
-                r.font.size = Pt(16)
-                if header_color is not None:
-                    r.font.color.rgb = header_color
-                p.paragraph_format.space_before = Pt(0)
-                p.paragraph_format.space_after = Pt(0)
-                p.paragraph_format.line_spacing = Pt(11)
-
-                if col in df_stats.columns:
-                    df_cat = df_stats.copy()
-                    df_cat[col] = pd.to_numeric(df_cat[col], errors="coerce")
-                    df_cat["sort_val"] = df_cat[col].fillna(-1e9)
-                    df_cat = df_cat.sort_values("sort_val", ascending=False)
-
-                    for rank, (_, row) in enumerate(df_cat.iterrows(), start=1):
-                        value = row[col]
-                        jersey = clean_jersey(row["Jersey"])
-                        name = str(row["Player"])
-
-                        if pd.isna(value):
-                            val_str = "DNQ"
-                            suffix = ""
-                        else:
-                            if abs(value - int(value)) < 1e-6:
-                                val_str = f"{int(value)}"
-                            else:
-                                val_str = f"{value:.1f}"
-                            suffix = "" if col in ["ORtg", "FC/40", "FD/40"] else "%"
-
-                        pl = right_cell.add_paragraph()
-                        pr = pl.add_run(f"{rank}. #{jersey} {name} – {val_str}{suffix}")
-                        pr.font.size = Pt(11)
-                        pl.paragraph_format.space_before = Pt(0)
-                        pl.paragraph_format.space_after = Pt(0)
-                        pl.paragraph_format.line_spacing = Pt(11)
-
-            sp = doc.add_paragraph()
-            sp.paragraph_format.space_before = Pt(0)
-            sp.paragraph_format.space_after = Pt(0)
-            sp.paragraph_format.line_spacing = Pt(0.25)
-
-        docx_buffer = BytesIO()
-        doc.save(docx_buffer)
-        docx_buffer.seek(0)
-
-        filename = f"{safe_team_name}_advanced_statistics.docx"
-
-        st.download_button(
-            label="Download Advanced Stats DOCX",
-            data=docx_buffer,
-            file_name=filename,
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            key="download_advanced",
+        layout_mode = st.radio(
+            "Advanced Stats layout",
+            ["Default", "Custom"],
+            index=0,
+            horizontal=True,
+            help="Default = current preset categories. Custom = pick which stats appear in the DOCX.",
+            key="adv_layout_mode",
         )
+
+        if layout_mode == "Default":
+            # Keep existing behavior
+            categories = ADVANCED_STAT_OPTIONS
+        else:
+            # Only allow stats that actually exist in df_stats
+            available_options = [
+                (col, label)
+                for (col, label) in ADVANCED_STAT_OPTIONS
+                if col in df_stats.columns
+            ]
+            option_labels = [label for (_, label) in available_options]
+            label_to_pair = {label: (col, label) for (col, label) in available_options}
+
+            selected_labels = st.multiselect(
+                "Choose which advanced stats to include (top to bottom = left-to-right ordering in DOCX):",
+                options=option_labels,
+                default=option_labels,
+                key="adv_selected_stats",
+            )
+
+            categories = [
+                label_to_pair[label]
+                for label in selected_labels
+                if label in label_to_pair
+            ]
+
+            if not categories:
+                st.warning(
+                    "Select at least one advanced stat to generate the Advanced Stats DOCX."
+                )
+
+        if categories:
+            # ---------- DOCX GENERATION (same logic, now using categories) ----------
+            doc = Document()
+            style = doc.styles["Normal"]
+            font = style.font
+            font.name = "Calibri"
+            font.size = Pt(11)
+
+            if logo_bytes:
+                logo_stream = BytesIO(logo_bytes)
+                doc.add_picture(logo_stream, width=Inches(1.2))
+                last_paragraph = doc.paragraphs[-1]
+                last_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+            title_paragraph = doc.add_paragraph()
+            run = title_paragraph.add_run(f"{title_text} ADVANCED STATISTICS")
+            run.bold = True
+            run.font.size = Pt(14)
+            if header_color is not None:
+                run.font.color.rgb = header_color
+            title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            title_paragraph.paragraph_format.space_after = Pt(4)
+
+            # Pair categories two per row (left/right)
+            pairs = []
+            for i in range(0, len(categories), 2):
+                if i + 1 < len(categories):
+                    pairs.append((categories[i], categories[i + 1]))
+                else:
+                    pairs.append((categories[i], None))
+
+            for left_cat, right_cat in pairs:
+                table = doc.add_table(rows=1, cols=2)
+                table.autofit = True
+                remove_table_borders(table)
+
+                left_cell = table.rows[0].cells[0]
+                right_cell = table.rows[0].cells[1]
+
+                # LEFT CATEGORY
+                if left_cat is not None:
+                    col, title = left_cat
+                    p = left_cell.add_paragraph()
+                    r = p.add_run(title)
+                    r.bold = True
+                    r.font.size = Pt(16)
+                    if header_color is not None:
+                        r.font.color.rgb = header_color
+                    p.paragraph_format.space_before = Pt(0)
+                    p.paragraph_format.space_after = Pt(0)
+                    p.paragraph_format.line_spacing = Pt(11)
+
+                    if col in df_stats.columns:
+                        df_cat = df_stats.copy()
+                        df_cat[col] = pd.to_numeric(df_cat[col], errors="coerce")
+                        df_cat["sort_val"] = df_cat[col].fillna(-1e9)
+                        df_cat = df_cat.sort_values("sort_val", ascending=False)
+
+                        for rank, (_, row) in enumerate(df_cat.iterrows(), start=1):
+                            value = row[col]
+                            jersey = clean_jersey(row["Jersey"])
+                            name = str(row["Player"])
+
+                            if pd.isna(value):
+                                val_str = "DNQ"
+                                suffix = ""
+                            else:
+                                if abs(value - int(value)) < 1e-6:
+                                    val_str = f"{int(value)}"
+                                else:
+                                    val_str = f"{value:.1f}"
+                                suffix = "" if col in ["ORtg", "FC/40", "FD/40"] else "%"
+
+                            pl = left_cell.add_paragraph()
+                            pr = pl.add_run(
+                                f"{rank}. #{jersey} {name} – {val_str}{suffix}"
+                            )
+                            pr.font.size = Pt(11)
+                            pl.paragraph_format.space_before = Pt(0)
+                            pl.paragraph_format.space_after = Pt(0)
+                            pl.paragraph_format.line_spacing = Pt(11)
+
+                # RIGHT CATEGORY
+                if right_cat is not None:
+                    col, title = right_cat
+                    p = right_cell.add_paragraph()
+                    r = p.add_run(title)
+                    r.bold = True
+                    r.font.size = Pt(16)
+                    if header_color is not None:
+                        r.font.color.rgb = header_color
+                    p.paragraph_format.space_before = Pt(0)
+                    p.paragraph_format.space_after = Pt(0)
+                    p.paragraph_format.line_spacing = Pt(11)
+
+                    if col in df_stats.columns:
+                        df_cat = df_stats.copy()
+                        df_cat[col] = pd.to_numeric(df_cat[col], errors="coerce")
+                        df_cat["sort_val"] = df_cat[col].fillna(-1e9)
+                        df_cat = df_cat.sort_values("sort_val", ascending=False)
+
+                        for rank, (_, row) in enumerate(df_cat.iterrows(), start=1):
+                            value = row[col]
+                            jersey = clean_jersey(row["Jersey"])
+                            name = str(row["Player"])
+
+                            if pd.isna(value):
+                                val_str = "DNQ"
+                                suffix = ""
+                            else:
+                                if abs(value - int(value)) < 1e-6:
+                                    val_str = f"{int(value)}"
+                                else:
+                                    val_str = f"{value:.1f}"
+                                suffix = "" if col in ["ORtg", "FC/40", "FD/40"] else "%"
+
+                            pl = right_cell.add_paragraph()
+                            pr = pl.add_run(
+                                f"{rank}. #{jersey} {name} – {val_str}{suffix}"
+                            )
+                            pr.font.size = Pt(11)
+                            pl.paragraph_format.space_before = Pt(0)
+                            pl.paragraph_format.space_after = Pt(0)
+                            pl.paragraph_format.line_spacing = Pt(11)
+
+                # spacer between paired categories
+                sp = doc.add_paragraph()
+                sp.paragraph_format.space_before = Pt(0)
+                sp.paragraph_format.space_after = Pt(0)
+                sp.paragraph_format.line_spacing = Pt(0.25)
+
+            docx_buffer = BytesIO()
+            doc.save(docx_buffer)
+            docx_buffer.seek(0)
+
+            filename = f"{safe_team_name}_advanced_statistics.docx"
+
+            st.download_button(
+                label="Download Advanced Stats DOCX",
+                data=docx_buffer,
+                file_name=filename,
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                key="download_advanced",
+            )
+
 
 st.markdown("---")  # Divider between sections
 
@@ -1022,7 +1070,7 @@ if overview_file is not None:
         st.dataframe(df_overview, use_container_width=True)
 
         # ---- DNQ CHECK: convert blanks/whitespace -> NaN ----
-        df_overview = df_overview.replace(r'^\s*$', None, regex=True)
+        df_overview = df_overview.replace(r"^\s*$", None, regex=True)
 
         if df_overview.isnull().values.any():
             st.warning("⚠️ Overview contains missing data — marked as **DNQ**.")
@@ -1030,7 +1078,8 @@ if overview_file is not None:
         else:
             overview_result = "Qualified"
 
-        left_overview = [
+        # ---------------- OVERVIEW LAYOUT MODE ----------------
+        BASE_LEFT_OVERVIEW = [
             ("tsPct", "True Shooting %"),
             ("fgaP40", "Field Goal Attempts per 40 (FGA/40)"),
             ("fg2Pct", "Two-Point %"),
@@ -1042,7 +1091,7 @@ if overview_file is not None:
             ("blkPct", "Block %"),
         ]
 
-        right_overview = [
+        BASE_RIGHT_OVERVIEW = [
             ("fg3Pct", "Three-Point %"),
             ("ftPct", "Free Throw %"),
             ("fga3Rate", "Three-Point Attempt Rate"),
@@ -1054,132 +1103,182 @@ if overview_file is not None:
             ("pfEff", "PF Efficiency"),
         ]
 
-        overview_pairs = []
-        max_len = max(len(left_overview), len(right_overview))
-        for i in range(max_len):
-            left = left_overview[i] if i < len(left_overview) else None
-            right = right_overview[i] if i < len(right_overview) else None
-            overview_pairs.append((left, right))
-
-        overview_doc = Document()
-        style = overview_doc.styles["Normal"]
-        font = style.font
-        font.name = "Calibri"
-        font.size = Pt(11)
-
-        if logo_bytes:
-            logo_stream = BytesIO(logo_bytes)
-            overview_doc.add_picture(logo_stream, width=Inches(1.2))
-            last_paragraph = overview_doc.paragraphs[-1]
-            last_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-        title_paragraph = overview_doc.add_paragraph()
-        run = title_paragraph.add_run(f"{title_text} OVERVIEW STATISTICS")
-        run.bold = True
-        run.font.size = Pt(14)
-        if header_color is not None:
-            run.font.color.rgb = header_color
-        title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        title_paragraph.paragraph_format.space_after = Pt(4)
-
-        for left_cat, right_cat in overview_pairs:
-            table = overview_doc.add_table(rows=1, cols=2)
-            table.autofit = True
-            remove_table_borders(table)
-
-            left_cell = table.rows[0].cells[0]
-            right_cell = table.rows[0].cells[1]
-
-            # ---------------- LEFT SIDE ----------------
-            if left_cat is not None:
-                col, title = left_cat
-                p = left_cell.add_paragraph()
-                r = p.add_run(title)
-                r.bold = True
-                r.font.size = Pt(16)
-                if header_color is not None:
-                    r.font.color.rgb = header_color
-                p.paragraph_format.space_before = Pt(0)
-                p.paragraph_format.space_after = Pt(0)
-                p.paragraph_format.line_spacing = Pt(11)
-
-                if col in df_overview.columns:
-                    df_cat = df_overview.copy()
-                    df_cat[col] = pd.to_numeric(df_cat[col], errors="coerce")
-                    # DNQ sorted to bottom
-                    df_cat["sort_val"] = df_cat[col].fillna(-1e9)
-                    df_cat = df_cat.sort_values("sort_val", ascending=False)
-
-                    for rank, (_, row) in enumerate(df_cat.iterrows(), start=1):
-                        jersey = clean_jersey(row["Jersey"])
-                        name = str(row["Player"])
-
-                        if pd.isna(row[col]):
-                            val_str = "DNQ"
-                        else:
-                            val_str = format_overview_value(col, row[col])
-
-                        pl = left_cell.add_paragraph()
-                        pr = pl.add_run(f"{rank}. #{jersey} {name} – {val_str}")
-                        pr.font.size = Pt(11)
-                        pl.paragraph_format.space_before = Pt(0)
-                        pl.paragraph_format.space_after = Pt(0)
-                        pl.paragraph_format.line_spacing = Pt(11)
-
-            # ---------------- RIGHT SIDE ----------------
-            if right_cat is not None:
-                col, title = right_cat
-                p = right_cell.add_paragraph()
-                r = p.add_run(title)
-                r.bold = True
-                r.font.size = Pt(16)
-                if header_color is not None:
-                    r.font.color.rgb = header_color
-                p.paragraph_format.space_before = Pt(0)
-                p.paragraph_format.space_after = Pt(0)
-                p.paragraph_format.line_spacing = Pt(11)
-
-                if col in df_overview.columns:
-                    df_cat = df_overview.copy()
-                    df_cat[col] = pd.to_numeric(df_cat[col], errors="coerce")
-                    df_cat["sort_val"] = df_cat[col].fillna(-1e9)
-                    df_cat = df_cat.sort_values("sort_val", ascending=False)
-
-                    for rank, (_, row) in enumerate(df_cat.iterrows(), start=1):
-                        jersey = clean_jersey(row["Jersey"])
-                        name = str(row["Player"])
-
-                        if pd.isna(row[col]):
-                            val_str = "DNQ"
-                        else:
-                            val_str = format_overview_value(col, row[col])
-
-                        pl = right_cell.add_paragraph()
-                        pr = pl.add_run(f"{rank}. #{jersey} {name} – {val_str}")
-                        pr.font.size = Pt(11)
-                        pl.paragraph_format.space_before = Pt(0)
-                        pl.paragraph_format.space_after = Pt(0)
-                        pl.paragraph_format.line_spacing = Pt(11)
-
-            # spacer between paired categories
-            sp = overview_doc.add_paragraph()
-            sp.paragraph_format.space_before = Pt(0)
-            sp.paragraph_format.space_after = Pt(0)
-            sp.paragraph_format.line_spacing = Pt(0.25)
-
-        overview_buffer = BytesIO()
-        overview_doc.save(overview_buffer)
-        overview_buffer.seek(0)
-
-        overview_filename = f"{safe_team_name}_overview_statistics.docx"
-
-        st.download_button(
-            label="Download Overview DOCX",
-            data=overview_buffer,
-            file_name=overview_filename,
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            key="download_overview",
+        overview_layout_mode = st.radio(
+            "Overview Stats layout",
+            ["Default", "Custom"],
+            index=0,
+            horizontal=True,
+            help="Default = current preset categories. Custom = pick which overview stats appear in the DOCX.",
+            key="overview_layout_mode",
         )
+
+        if overview_layout_mode == "Default":
+            left_overview = BASE_LEFT_OVERVIEW
+            right_overview = BASE_RIGHT_OVERVIEW
+
+            overview_pairs = []
+            max_len = max(len(left_overview), len(right_overview))
+            for i in range(max_len):
+                left = left_overview[i] if i < len(left_overview) else None
+                right = right_overview[i] if i < len(right_overview) else None
+                overview_pairs.append((left, right))
+        else:
+            # CUSTOM: use a single ordered list, then pair left/right from that sequence
+            all_options = BASE_LEFT_OVERVIEW + BASE_RIGHT_OVERVIEW
+
+            # Only allow stats present in df_overview
+            available_options = [
+                (col, label)
+                for (col, label) in all_options
+                if col in df_overview.columns
+            ]
+            option_labels = [label for (_, label) in available_options]
+            label_to_pair = {label: (col, label) for (col, label) in available_options}
+
+            selected_labels = st.multiselect(
+                "Choose which overview stats to include (top to bottom = left-to-right ordering in DOCX):",
+                options=option_labels,
+                default=option_labels,
+                key="overview_selected_stats",
+            )
+
+            selected_pairs = [
+                label_to_pair[label]
+                for label in selected_labels
+                if label in label_to_pair
+            ]
+
+            if not selected_pairs:
+                overview_pairs = []
+                st.warning("Select at least one overview stat to generate the Overview DOCX.")
+            else:
+                overview_pairs = []
+                # pair them: (0,1), (2,3), ...
+                for i in range(0, len(selected_pairs), 2):
+                    left = selected_pairs[i]
+                    right = selected_pairs[i + 1] if i + 1 < len(selected_pairs) else None
+                    overview_pairs.append((left, right))
+
+        if overview_pairs:
+            overview_doc = Document()
+            style = overview_doc.styles["Normal"]
+            font = style.font
+            font.name = "Calibri"
+            font.size = Pt(11)
+
+            if logo_bytes:
+                logo_stream = BytesIO(logo_bytes)
+                overview_doc.add_picture(logo_stream, width=Inches(1.2))
+                last_paragraph = overview_doc.paragraphs[-1]
+                last_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+            title_paragraph = overview_doc.add_paragraph()
+            run = title_paragraph.add_run(f"{title_text} OVERVIEW STATISTICS")
+            run.bold = True
+            run.font.size = Pt(14)
+            if header_color is not None:
+                run.font.color.rgb = header_color
+            title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            title_paragraph.paragraph_format.space_after = Pt(4)
+
+            for left_cat, right_cat in overview_pairs:
+                table = overview_doc.add_table(rows=1, cols=2)
+                table.autofit = True
+                remove_table_borders(table)
+
+                left_cell = table.rows[0].cells[0]
+                right_cell = table.rows[0].cells[1]
+
+                # ---------------- LEFT SIDE ----------------
+                if left_cat is not None:
+                    col, title = left_cat
+                    p = left_cell.add_paragraph()
+                    r = p.add_run(title)
+                    r.bold = True
+                    r.font.size = Pt(16)
+                    if header_color is not None:
+                        r.font.color.rgb = header_color
+                    p.paragraph_format.space_before = Pt(0)
+                    p.paragraph_format.space_after = Pt(0)
+                    p.paragraph_format.line_spacing = Pt(11)
+
+                    if col in df_overview.columns:
+                        df_cat = df_overview.copy()
+                        df_cat[col] = pd.to_numeric(df_cat[col], errors="coerce")
+                        # DNQ sorted to bottom
+                        df_cat["sort_val"] = df_cat[col].fillna(-1e9)
+                        df_cat = df_cat.sort_values("sort_val", ascending=False)
+
+                        for rank, (_, row) in enumerate(df_cat.iterrows(), start=1):
+                            jersey = clean_jersey(row["Jersey"])
+                            name = str(row["Player"])
+
+                            if pd.isna(row[col]):
+                                val_str = "DNQ"
+                            else:
+                                val_str = format_overview_value(col, row[col])
+
+                            pl = left_cell.add_paragraph()
+                            pr = pl.add_run(f"{rank}. #{jersey} {name} – {val_str}")
+                            pr.font.size = Pt(11)
+                            pl.paragraph_format.space_before = Pt(0)
+                            pl.paragraph_format.space_after = Pt(0)
+                            pl.paragraph_format.line_spacing = Pt(11)
+
+                # ---------------- RIGHT SIDE ----------------
+                if right_cat is not None:
+                    col, title = right_cat
+                    p = right_cell.add_paragraph()
+                    r = p.add_run(title)
+                    r.bold = True
+                    r.font.size = Pt(16)
+                    if header_color is not None:
+                        r.font.color.rgb = header_color
+                    p.paragraph_format.space_before = Pt(0)
+                    p.paragraph_format.space_after = Pt(0)
+                    p.paragraph_format.line_spacing = Pt(11)
+
+                    if col in df_overview.columns:
+                        df_cat = df_overview.copy()
+                        df_cat[col] = pd.to_numeric(df_cat[col], errors="coerce")
+                        df_cat["sort_val"] = df_cat[col].fillna(-1e9)
+                        df_cat = df_cat.sort_values("sort_val", ascending=False)
+
+                        for rank, (_, row) in enumerate(df_cat.iterrows(), start=1):
+                            jersey = clean_jersey(row["Jersey"])
+                            name = str(row["Player"])
+
+                            if pd.isna(row[col]):
+                                val_str = "DNQ"
+                            else:
+                                val_str = format_overview_value(col, row[col])
+
+                            pl = right_cell.add_paragraph()
+                            pr = pl.add_run(f"{rank}. #{jersey} {name} – {val_str}")
+                            pr.font.size = Pt(11)
+                            pl.paragraph_format.space_before = Pt(0)
+                            pl.paragraph_format.space_after = Pt(0)
+                            pl.paragraph_format.line_spacing = Pt(11)
+
+                # spacer between paired categories
+                sp = overview_doc.add_paragraph()
+                sp.paragraph_format.space_before = Pt(0)
+                sp.paragraph_format.space_after = Pt(0)
+                sp.paragraph_format.line_spacing = Pt(0.25)
+
+            overview_buffer = BytesIO()
+            overview_doc.save(overview_buffer)
+            overview_buffer.seek(0)
+
+            overview_filename = f"{safe_team_name}_overview_statistics.docx"
+
+            st.download_button(
+                label="Download Overview DOCX",
+                data=overview_buffer,
+                file_name=overview_filename,
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                key="download_overview",
+            )
 
 
 # =========================================================
