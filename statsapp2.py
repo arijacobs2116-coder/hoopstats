@@ -1165,13 +1165,19 @@ if overview_file is not None:
 
             if not selected_pairs:
                 overview_pairs = []
-                st.warning("Select at least one overview stat to generate the Overview DOCX.")
+                st.warning(
+                    "Select at least one overview stat to generate the Overview DOCX."
+                )
             else:
                 overview_pairs = []
                 # pair them: (0,1), (2,3), ...
                 for i in range(0, len(selected_pairs), 2):
                     left = selected_pairs[i]
-                    right = selected_pairs[i + 1] if i + 1 < len(selected_pairs) else None
+                    right = (
+                        selected_pairs[i + 1]
+                        if i + 1 < len(selected_pairs)
+                        else None
+                    )
                     overview_pairs.append((left, right))
 
         if overview_pairs:
