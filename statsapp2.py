@@ -831,12 +831,15 @@ if df_stats is not None:
             ("Stl%", "Steal %"),
         ]
 
+        # mapping from column -> nice label for known stats
+        adv_col_to_label = {col: label for col, label in ADVANCED_STAT_OPTIONS}
+
         layout_mode = st.radio(
             "Advanced Stats layout",
             ["Default", "Custom"],
             index=0,
             horizontal=True,
-            help="Default = current preset categories. Custom = pick which stats appear in the DOCX.",
+            help="Default = current preset categories. Custom = pick any stats from the table to appear in the DOCX.",
             key="adv_layout_mode",
         )
 
@@ -844,14 +847,19 @@ if df_stats is not None:
             # Keep existing behavior
             categories = ADVANCED_STAT_OPTIONS
         else:
-            # Only allow stats that actually exist in df_stats
-            available_options = [
-                (col, label)
-                for (col, label) in ADVANCED_STAT_OPTIONS
-                if col in df_stats.columns
+            # CUSTOM: allow ANY column from df_stats (except Jersey/Player)
+            available_cols = [
+                c
+                for c in df_stats.columns
+                if c not in ["Jersey", "Player"]
             ]
-            option_labels = [label for (_, label) in available_options]
-            label_to_pair = {label: (col, label) for (col, label) in available_options}
+
+            option_labels = []
+            label_to_col = {}
+            for col in available_cols:
+                label = adv_col_to_label.get(col, col)  # fallback to raw col name
+                option_labels.append(label)
+                label_to_col[label] = col
 
             selected_labels = st.multiselect(
                 "Choose which advanced stats to include (top to bottom = left-to-right ordering in DOCX):",
@@ -861,9 +869,9 @@ if df_stats is not None:
             )
 
             categories = [
-                label_to_pair[label]
+                (label_to_col[label], label)
                 for label in selected_labels
-                if label in label_to_pair
+                if label in label_to_col
             ]
 
             if not categories:
@@ -1103,12 +1111,17 @@ if overview_file is not None:
             ("pfEff", "PF Efficiency"),
         ]
 
+        # mapping from column -> nice label for known overview stats
+        overview_col_to_label = {
+            col: label for col, label in (BASE_LEFT_OVERVIEW + BASE_RIGHT_OVERVIEW)
+        }
+
         overview_layout_mode = st.radio(
             "Overview Stats layout",
             ["Default", "Custom"],
             index=0,
             horizontal=True,
-            help="Default = current preset categories. Custom = pick which overview stats appear in the DOCX.",
+            help="Default = current preset categories. Custom = pick any stats from the table to appear in the DOCX.",
             key="overview_layout_mode",
         )
 
@@ -1123,17 +1136,19 @@ if overview_file is not None:
                 right = right_overview[i] if i < len(right_overview) else None
                 overview_pairs.append((left, right))
         else:
-            # CUSTOM: use a single ordered list, then pair left/right from that sequence
-            all_options = BASE_LEFT_OVERVIEW + BASE_RIGHT_OVERVIEW
-
-            # Only allow stats present in df_overview
-            available_options = [
-                (col, label)
-                for (col, label) in all_options
-                if col in df_overview.columns
+            # CUSTOM: allow ANY column from df_overview (except Jersey/Player)
+            available_cols = [
+                c
+                for c in df_overview.columns
+                if c not in ["Jersey", "Player"]
             ]
-            option_labels = [label for (_, label) in available_options]
-            label_to_pair = {label: (col, label) for (col, label) in available_options}
+
+            option_labels = []
+            label_to_col = {}
+            for col in available_cols:
+                label = overview_col_to_label.get(col, col)  # fallback to raw col name
+                option_labels.append(label)
+                label_to_col[label] = col
 
             selected_labels = st.multiselect(
                 "Choose which overview stats to include (top to bottom = left-to-right ordering in DOCX):",
@@ -1143,9 +1158,9 @@ if overview_file is not None:
             )
 
             selected_pairs = [
-                label_to_pair[label]
+                (label_to_col[label], label)
                 for label in selected_labels
-                if label in label_to_pair
+                if label in label_to_col
             ]
 
             if not selected_pairs:
