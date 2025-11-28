@@ -1962,7 +1962,7 @@ else:
         style.paragraph_format.space_before = Pt(0)
         style.paragraph_format.space_after = Pt(0)
 
-        # Logo + main title
+        # Logo + main title (cover header)
         if logo_bytes:
             full_doc.add_picture(BytesIO(logo_bytes), width=Inches(1.2))
             full_doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -1984,7 +1984,7 @@ else:
             r.font.size = Pt(14)
             if header_color is not None:
                 r.font.color.rgb = header_color
-            p.paragraph_format.space_before = Pt(6)
+            p.paragraph_format.space_before = Pt(0)
             p.paragraph_format.space_after = Pt(4)
             p.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
@@ -1992,9 +1992,9 @@ else:
         # OVERVIEW SECTION
         # -----------------------
         if has_overview:
+            # First section stays on the cover page
             add_section_heading(full_doc, "OVERVIEW STATISTICS")
 
-            # same base lists as overview section
             BASE_LEFT_OVERVIEW = [
                 ("tsPct", "True Shooting %"),
                 ("fgaP40", "Field Goal Attempts per 40 (FGA/40)"),
@@ -2025,9 +2025,7 @@ else:
                 "overview_layout_mode", "Default"
             )
 
-            # determine overview_pairs based on mode + previous selection
             overview_pairs = []
-
             if overview_layout_mode == "Default":
                 max_len_ov = max(len(BASE_LEFT_OVERVIEW), len(BASE_RIGHT_OVERVIEW))
                 for i in range(max_len_ov):
@@ -2035,7 +2033,6 @@ else:
                     right = BASE_RIGHT_OVERVIEW[i] if i < len(BASE_RIGHT_OVERVIEW) else None
                     overview_pairs.append((left, right))
             else:
-                # rebuild basketball_cols like before
                 meta_id_cols = {
                     "competitionId",
                     "teamId",
@@ -2058,7 +2055,6 @@ else:
                     "state",
                     "country",
                 ]
-
                 basketball_cols = []
                 for c in df_overview.columns:
                     if c in ["Jersey", "Player"]:
@@ -2075,7 +2071,6 @@ else:
                         continue
                     basketball_cols.append(c)
 
-                # label mapping
                 label_to_col = {}
                 for col in basketball_cols:
                     label = overview_col_to_label.get(col, col)
@@ -2083,7 +2078,6 @@ else:
 
                 selected_labels = st.session_state.get("overview_selected_stats", [])
                 if not selected_labels:
-                    # fallback to default if no selection
                     max_len_ov = max(len(BASE_LEFT_OVERVIEW), len(BASE_RIGHT_OVERVIEW))
                     for i in range(max_len_ov):
                         left = BASE_LEFT_OVERVIEW[i] if i < len(BASE_LEFT_OVERVIEW) else None
@@ -2104,7 +2098,6 @@ else:
                         )
                         overview_pairs.append((left, right))
 
-            # render overview_pairs
             for left_cat, right_cat in overview_pairs:
                 table = full_doc.add_table(rows=1, cols=2)
                 table.autofit = True
@@ -2188,6 +2181,10 @@ else:
                 spacer.paragraph_format.space_after = Pt(0)
                 spacer.paragraph_format.line_spacing = Pt(0.25)
 
+            # new page after overview if there are other sections
+            if has_adv or has_shot:
+                full_doc.add_page_break()
+
         # -----------------------
         # ADVANCED SECTION
         # -----------------------
@@ -2226,14 +2223,12 @@ else:
                     else:
                         adv_pairs.append((BASE_ADV_CATEGORIES[i], None))
             else:
-                # build mapping to recover columns from labels
                 label_to_col_adv = {}
                 for col, label in BASE_ADV_CATEGORIES:
                     label_to_col_adv[label] = col
 
                 selected_labels = st.session_state.get("advanced_selected_stats", [])
                 if not selected_labels:
-                    # fallback to default
                     for i in range(0, len(BASE_ADV_CATEGORIES), 2):
                         if i + 1 < len(BASE_ADV_CATEGORIES):
                             adv_pairs.append(
@@ -2256,7 +2251,6 @@ else:
                         )
                         adv_pairs.append((left, right))
 
-            # render adv_pairs
             for left_cat, right_cat in adv_pairs:
                 table = full_doc.add_table(rows=1, cols=2)
                 table.autofit = True
@@ -2352,11 +2346,15 @@ else:
                 spacer.paragraph_format.space_after = Pt(0)
                 spacer.paragraph_format.line_spacing = Pt(0.25)
 
+            # new page after advanced if there is shot diet/FG%
+            if has_shot:
+                full_doc.add_page_break()
+
         # -----------------------
         # SHOT DIET + FG% SECTION
         # -----------------------
         if has_shot:
-            # SHOT DIET
+            # SHOT DIET PAGE
             add_section_heading(full_doc, "SHOT DIET RANKINGS")
 
             left_zone_categories = [
@@ -2428,7 +2426,10 @@ else:
                         para.paragraph_format.space_before = Pt(0)
                         para.paragraph_format.space_after = Pt(0)
 
-            # FG% BY ZONE
+            # new page for FG% section
+            full_doc.add_page_break()
+
+            # FG% BY ZONE PAGE
             add_section_heading(full_doc, "FG% BY ZONE RANKINGS")
 
             fg_left_sections = [
